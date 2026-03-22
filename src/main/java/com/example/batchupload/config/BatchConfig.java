@@ -94,15 +94,17 @@ public class BatchConfig {
 
     // ── Step with Local Chunking (Spring Batch 6 new feature) ─────────────────
 
+    private static final int CHUNK_SIZE = 5000;
+    private static final int THREAD_POOL_SIZE = 4;
+
     @Bean
     public Step loadStep(JobRepository jobRepository,
                          JdbcTransactionManager transactionManager,
-                         AppProperties props,
                          ByteRangeFlatFileItemReader itemReader,
                          DimensionItemProcessor itemProcessor,
                          ChunkTaskExecutorItemWriter<DimensionRecord> localChunkWriter) {
         return new StepBuilder("loadStep", jobRepository)
-                .<DimensionRecord, DimensionRecord>chunk(props.batch().chunkSize())
+                .<DimensionRecord, DimensionRecord>chunk(CHUNK_SIZE)
                 .transactionManager(transactionManager)
                 .reader(itemReader)
                 .processor(itemProcessor)
@@ -135,12 +137,11 @@ public class BatchConfig {
 
     @Bean
     public ChunkTaskExecutorItemWriter<DimensionRecord> localChunkWriter(
-            ChunkProcessor<DimensionRecord> chunkProcessor,
-            AppProperties props) {
+            ChunkProcessor<DimensionRecord> chunkProcessor) {
 
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
-        taskExecutor.setCorePoolSize(props.batch().threadPoolSize());
-        taskExecutor.setMaxPoolSize(props.batch().threadPoolSize());
+        taskExecutor.setCorePoolSize(THREAD_POOL_SIZE);
+        taskExecutor.setMaxPoolSize(THREAD_POOL_SIZE);
         taskExecutor.setThreadNamePrefix("chunk-writer-");
         taskExecutor.setWaitForTasksToCompleteOnShutdown(true);
         taskExecutor.setAwaitTerminationSeconds(600);

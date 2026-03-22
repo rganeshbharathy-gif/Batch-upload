@@ -1,6 +1,5 @@
 package com.example.batchupload.service;
 
-import com.example.batchupload.config.AppProperties;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -16,24 +15,23 @@ import java.io.InputStream;
 @Service
 public class S3FileService {
 
-    private final S3Client s3Client;
-    private final String bucket;
-    private final String key;
+    private static final String BUCKET = "my-bucket";
+    private static final String KEY = "data/dimensions.dat";
+    private static final String REGION = "us-east-1";
 
-    public S3FileService(AppProperties props) {
-        AppProperties.S3 s3Props = props.s3();
-        this.bucket = s3Props.bucket();
-        this.key = s3Props.key();
+    private final S3Client s3Client;
+
+    public S3FileService() {
         this.s3Client = S3Client.builder()
-                .region(Region.of(s3Props.region()))
+                .region(Region.of(REGION))
                 .build();
     }
 
     /** Returns the total size of the S3 object in bytes. */
     public long getFileSize() {
         return s3Client.headObject(HeadObjectRequest.builder()
-                .bucket(bucket)
-                .key(key)
+                .bucket(BUCKET)
+                .key(KEY)
                 .build()).contentLength();
     }
 
@@ -49,8 +47,8 @@ public class S3FileService {
                 : String.format("bytes=%d-%d", startByte, endByte - 1); // S3 range is inclusive
 
         return s3Client.getObject(GetObjectRequest.builder()
-                .bucket(bucket)
-                .key(key)
+                .bucket(BUCKET)
+                .key(KEY)
                 .range(range)
                 .build());
     }
