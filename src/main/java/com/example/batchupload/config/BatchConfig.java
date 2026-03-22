@@ -16,7 +16,7 @@ import org.springframework.batch.infrastructure.item.database.JdbcBatchItemWrite
 import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.TaskExecutor;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
@@ -83,7 +83,7 @@ public class BatchConfig {
                          ByteRangeFlatFileItemReader itemReader,
                          DimensionItemProcessor itemProcessor,
                          JdbcBatchItemWriter<DimensionRecord> itemWriter,
-                         TaskExecutor batchTaskExecutor) {
+                         AsyncTaskExecutor batchTaskExecutor) {
         return new StepBuilder("loadStep", jobRepository)
                 .<DimensionRecord, DimensionRecord>chunk(CHUNK_SIZE)
                 .transactionManager(transactionManager)
@@ -127,7 +127,7 @@ public class BatchConfig {
     // ── TaskExecutor for multi-threaded step ──────────────────────────────────
 
     @Bean
-    public TaskExecutor batchTaskExecutor() {
+    public AsyncTaskExecutor batchTaskExecutor() {
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
         taskExecutor.setCorePoolSize(THREAD_POOL_SIZE);
         taskExecutor.setMaxPoolSize(THREAD_POOL_SIZE);
