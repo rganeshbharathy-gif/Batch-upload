@@ -1,9 +1,9 @@
 package com.example.batchupload.processor;
 
 import com.example.batchupload.model.DimensionRecord;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.lang.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.infrastructure.item.ItemProcessor;
 import org.springframework.stereotype.Component;
 
 /**
@@ -12,25 +12,24 @@ import org.springframework.stereotype.Component;
  * <p>Returning {@code null} causes Spring Batch to silently skip the item — no exception,
  * no retry, no rollback. Use this for business-rule filtering (e.g. blank mandatory fields).
  */
-@Slf4j
 @Component
 public class DimensionItemProcessor implements ItemProcessor<DimensionRecord, DimensionRecord> {
 
+    private static final Logger log = LoggerFactory.getLogger(DimensionItemProcessor.class);
+
     @Override
-    public DimensionRecord process(@NonNull DimensionRecord item) {
-        // Drop records where the two primary identifiers are both blank
-        if (isBlank(item.getCsiId()) && isBlank(item.getPersonId())) {
+    public DimensionRecord process(DimensionRecord item) {
+        if (isBlank(item.csiId()) && isBlank(item.personId())) {
             log.debug("Skipping record — both csi_id and person_id are blank");
             return null;
         }
 
-        // Truncate to Oracle column limits to avoid ORA-12899
-        item.setCsiId(truncate(item.getCsiId(), 100));
-        item.setPersonId(truncate(item.getPersonId(), 100));
-        item.setCountryCode(truncate(item.getCountryCode(), 10));
-        item.setEconomicCode(truncate(item.getEconomicCode(), 50));
-
-        return item;
+        return new DimensionRecord(
+                truncate(item.csiId(), 100),
+                truncate(item.personId(), 100),
+                truncate(item.countryCode(), 10),
+                truncate(item.economicCode(), 50)
+        );
     }
 
     private static boolean isBlank(String s) {

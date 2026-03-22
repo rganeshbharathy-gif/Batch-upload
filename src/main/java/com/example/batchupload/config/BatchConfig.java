@@ -2,74 +2,82 @@ package com.example.batchupload.config;
 
 import com.example.batchupload.model.DimensionRecord;
 import com.example.batchupload.model.FileRange;
-import com.example.batchupload.partitioner.PodByteRangePartitioner;
 import com.example.batchupload.processor.DimensionItemProcessor;
 import com.example.batchupload.reader.ByteRangeFlatFileItemReader;
-import com.example.batchupload.writer.DimensionItemWriter;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.builder.JobBuilder;
-import org.springframework.batch.core.partition.support.TaskExecutorPartitionHandler;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.core.step.item.ChunkProcessor;
+import org.springframework.batch.infrastructure.item.database.JdbcBatchItemWriter;
+import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchItemWriterBuilder;
+import org.springframework.batch.integration.chunk.ChunkTaskExecutorItemWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.TaskExecutor;
+import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Spring Batch configuration for the Dimension Load job.
+ * Spring Batch 6 configuration for the Dimension Load job using <b>local chunking</b>.
  *
- * <h2>Architecture</h2>
+ * <h2>Architecture (Local Chunking — Spring Batch 6)</h2>
  * <pre>
  *  Kubernetes Indexed Job
- *  ┌──────────────────────────────────────┐
- *  │  Pod 0  (JOB_COMPLETION_INDEX=0)     │
- *  │  ┌────────────────────────────────┐  │
- *  │  │ dimensionLoadJob               │  │
- *  │  │   managerStep                  │  │
- *  │  │     PodByteRangePartitioner    │  │
- *  │  │       ├─ workerStep-thread-0   │  │   ─┐
- *  │  │       ├─ workerStep-thread-1   │  │    │  threadPoolSize threads
- *  │  │       └─ workerStep-thread-N   │  │   ─┘
- *  │  └────────────────────────────────┘  │
- *  └──────────────────────────────────────┘
+ *  ┌─────────────────────────────────────────────────────────┐
+ *  │  Pod 0  (JOB_COMPLETION_INDEX=0)                        │
+ *  │  ┌───────────────────────────────────────────────────┐  │
+ *  │  │ dimensionLoadJob                                  │  │
+ *  │  │   loadStep (producer-consumer local chunking)     │  │
+ *  │  │                                                   │  │
+ *  │  │   [Reader] ─→ [Processor] ─→ chunk queue ─→      │  │
+ *  │  │     (single thread, sequential disk I/O)          │  │
+ *  │  │                                 ├→ writer-0 (tx)  │  │
+ *  │  │                                 ├→ writer-1 (tx)  │  │
+ *  │  │                                 ├→ writer-2 (tx)  │  │
+ *  │  │                                 └→ writer-3 (tx)  │  │
+ *  │  │     (parallel DB writes, each in own transaction) │  │
+ *  │  └───────────────────────────────────────────────────┘  │
+ *  └─────────────────────────────────────────────────────────┘
  *       ...repeated for Pod 1, 2, ..., N-1
  * </pre>
  *
  * <h2>Parallelism</h2>
  * <ul>
- *   <li><b>Cross-pod</b>: Each pod reads a distinct byte range of the shared file.
- *       {@code JOB_COMPLETION_INDEX} (0-based) and {@code TOTAL_PODS} drive the split.
- *   <li><b>Within-pod</b>: The pod's range is further divided into {@code threadPoolSize}
- *       sub-ranges, each handled by one worker thread.
+ *   <li><b>Cross-pod</b>: Each K8s pod reads a distinct byte range of the shared file.
+ *       {@code JOB_COMPLETION_INDEX} and {@code TOTAL_PODS} drive the split.
+ *   <li><b>Within-pod (local chunking)</b>: A single reader thread produces chunks
+ *       sequentially (optimal for disk I/O). Each chunk is dispatched via
+ *       {@link ChunkTaskExecutorItemWriter} to a pool of writer threads.
+ *       Each writer thread runs the {@link ChunkProcessor} which performs the JDBC
+ *       batch insert in its own transaction (producer-consumer pattern).
  * </ul>
  *
- * <h2>Fault tolerance</h2>
- * All Spring Batch metadata (job/step execution state) is persisted in the shared Oracle
- * database, so a failed pod can be restarted without re-processing already-committed chunks.
+ * <h2>Why local chunking over partitioning?</h2>
+ * <ul>
+ *   <li>Sequential disk reads avoid random-seek contention from multiple reader threads.
+ *   <li>DB writes — the true bottleneck — are parallelised across worker threads.
+ *   <li>Built-in backpressure: the producer pauses when the bounded queue is full.
+ *   <li>Simpler configuration: no partitioner, no step-scoped beans, no grid-size tuning.
+ * </ul>
  */
-@Slf4j
 @Configuration
-@RequiredArgsConstructor
 public class BatchConfig {
 
-    private final AppProperties props;
-    private final DimensionItemProcessor processor;
-    private final DimensionItemWriter writer;
-    private final JobRepository jobRepository;
-    private final PlatformTransactionManager transactionManager;
+    private static final Logger log = LoggerFactory.getLogger(BatchConfig.class);
 
-    // ── K8s environment variables ──────────────────────────────────────────────
+    private static final String INSERT_SQL =
+            "INSERT INTO dimensions (csi_id, person_id, country_code, economic_code) VALUES (?, ?, ?, ?)";
 
     @Value("${JOB_COMPLETION_INDEX:0}")
     private int podIndex;
@@ -80,24 +88,34 @@ public class BatchConfig {
     // ── Job ───────────────────────────────────────────────────────────────────
 
     @Bean
-    public Job dimensionLoadJob() {
+    public Job dimensionLoadJob(JobRepository jobRepository, Step loadStep) {
         return new JobBuilder("dimensionLoadJob-pod" + podIndex, jobRepository)
-                .start(managerStep())
+                .start(loadStep)
                 .build();
     }
 
-    // ── Manager step (partitions & dispatches to worker threads) ──────────────
+    // ── Step with Local Chunking (Spring Batch 6 new feature) ─────────────────
 
     @Bean
-    public Step managerStep() {
-        return new StepBuilder("managerStep", jobRepository)
-                .partitioner("workerStep", podByteRangePartitioner())
-                .partitionHandler(partitionHandler())
+    public Step loadStep(JobRepository jobRepository,
+                         JdbcTransactionManager transactionManager,
+                         AppProperties props,
+                         ByteRangeFlatFileItemReader itemReader,
+                         DimensionItemProcessor itemProcessor,
+                         ChunkTaskExecutorItemWriter<DimensionRecord> localChunkWriter) {
+        return new StepBuilder("loadStep", jobRepository)
+                .<DimensionRecord, DimensionRecord>chunk(props.getBatch().getChunkSize())
+                .transactionManager(transactionManager)
+                .reader(itemReader)
+                .processor(itemProcessor)
+                .writer(localChunkWriter)
                 .build();
     }
 
+    // ── Reader: single-threaded, sequential I/O for the pod's byte range ──────
+
     @Bean
-    public PodByteRangePartitioner podByteRangePartitioner() {
+    public ByteRangeFlatFileItemReader byteRangeReader(AppProperties props) {
         Path filePath = Path.of(props.getFile().getPath());
         long fileSize = resolveFileSize(filePath);
         FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
@@ -106,99 +124,65 @@ public class BatchConfig {
                 podIndex, totalPods, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
-        return new PodByteRangePartitioner(filePath, podRange);
+        AppProperties.Columns cols = props.getColumns();
+        return new ByteRangeFlatFileItemReader(
+                filePath, podRange,
+                cols.getCsiIdIndex(), cols.getPersonIdIndex(),
+                cols.getCountryCodeIndex(), cols.getEconomicCodeIndex());
     }
 
+    // ── Local Chunking: ChunkTaskExecutorItemWriter ──────────────────────────
+    //
+    // This is the key Spring Batch 6 feature. Instead of partitioning the step
+    // into N worker steps (each with its own reader), we use a SINGLE reader
+    // and dispatch each chunk to a pool of writer threads.
+    //
+    // Think of it like "remote chunking, but with local threads" — the same
+    // producer-consumer model without the network overhead.
+
     @Bean
-    public TaskExecutorPartitionHandler partitionHandler() {
-        TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
-        handler.setStep(workerStep());
-        handler.setTaskExecutor(batchTaskExecutor());
-        handler.setGridSize(props.getBatch().getThreadPoolSize());
-        return handler;
+    public ChunkTaskExecutorItemWriter<DimensionRecord> localChunkWriter(
+            ChunkProcessor<DimensionRecord> chunkProcessor,
+            AppProperties props) {
+
+        ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
+        taskExecutor.setCorePoolSize(props.getBatch().getThreadPoolSize());
+        taskExecutor.setMaxPoolSize(props.getBatch().getThreadPoolSize());
+        taskExecutor.setThreadNamePrefix("chunk-writer-");
+        taskExecutor.setWaitForTasksToCompleteOnShutdown(true);
+        taskExecutor.setAwaitTerminationSeconds(600);
+        taskExecutor.afterPropertiesSet();
+
+        return new ChunkTaskExecutorItemWriter<>(chunkProcessor, taskExecutor);
     }
 
-    // ── Worker step (runs inside each thread) ──────────────────────────────────
+    // ── ChunkProcessor: each worker thread writes one chunk in its own tx ────
 
     @Bean
-    public Step workerStep() {
-        return new StepBuilder("workerStep", jobRepository)
-                .<DimensionRecord, DimensionRecord>chunk(props.getBatch().getChunkSize(), transactionManager)
-                // Reader is created per-partition via the factory method below
-                .reader(workerStepReader(new ExecutionContext()))  // placeholder; real reader built in factory
-                .processor(processor)
-                .writer(writer)
-                // Retry transient DB errors up to 3 times
-                .faultTolerant()
-                    .retryLimit(3)
-                    .retry(org.springframework.dao.TransientDataAccessException.class)
-                // Skip unrecoverable parse errors without failing the step
-                    .skipLimit(10_000)
-                    .skip(Exception.class)
-                    .noSkip(org.springframework.dao.DataIntegrityViolationException.class)
+    public ChunkProcessor<DimensionRecord> chunkProcessor(DataSource dataSource,
+                                                           TransactionTemplate transactionTemplate) {
+        JdbcBatchItemWriter<DimensionRecord> itemWriter = new JdbcBatchItemWriterBuilder<DimensionRecord>()
+                .dataSource(dataSource)
+                .sql(INSERT_SQL)
+                .itemPreparedStatementSetter((item, ps) -> {
+                    ps.setString(1, item.csiId());
+                    ps.setString(2, item.personId());
+                    ps.setString(3, item.countryCode());
+                    ps.setString(4, item.economicCode());
+                })
                 .build();
-    }
 
-    /**
-     * Factory method called by Spring Batch for each partition's step execution.
-     * The {@link ExecutionContext} carries {@code startByte}, {@code endByte},
-     * and {@code isLast} populated by {@link PodByteRangePartitioner}.
-     */
-    public ByteRangeFlatFileItemReader workerStepReader(ExecutionContext ctx) {
-        long startByte = ctx.containsKey("startByte") ? ctx.getLong("startByte") : 0L;
-        long endByte = ctx.containsKey("endByte") ? ctx.getLong("endByte") : Long.MAX_VALUE;
-        boolean isLast = !ctx.containsKey("isLast") || Boolean.parseBoolean(ctx.getString("isLast"));
-
-        FileRange subRange = new FileRange(startByte, endByte, isLast);
-        AppProperties.Columns cols = props.getColumns();
-
-        return new ByteRangeFlatFileItemReader(
-                Path.of(props.getFile().getPath()),
-                subRange,
-                cols.getCsiIdIndex(),
-                cols.getPersonIdIndex(),
-                cols.getCountryCodeIndex(),
-                cols.getEconomicCodeIndex());
-    }
-
-    // ── Step-scoped reader bean wired via StepExecutionContext ─────────────────
-
-    /**
-     * This bean is step-scoped so Spring Batch creates a fresh instance per partition,
-     * injecting the correct {@code stepExecutionContext} values.
-     */
-    @Bean
-    @org.springframework.batch.core.configuration.annotation.StepScope
-    public ByteRangeFlatFileItemReader stepScopedReader(
-            @Value("#{stepExecutionContext['startByte'] ?: 0L}") long startByte,
-            @Value("#{stepExecutionContext['endByte'] ?: 9223372036854775807L}") long endByte,
-            @Value("#{stepExecutionContext['isLast'] ?: 'true'}") String isLast) {
-
-        FileRange subRange = new FileRange(startByte, endByte, Boolean.parseBoolean(isLast));
-        AppProperties.Columns cols = props.getColumns();
-
-        return new ByteRangeFlatFileItemReader(
-                Path.of(props.getFile().getPath()),
-                subRange,
-                cols.getCsiIdIndex(),
-                cols.getPersonIdIndex(),
-                cols.getCountryCodeIndex(),
-                cols.getEconomicCodeIndex());
-    }
-
-    // ── Thread pool ───────────────────────────────────────────────────────────
-
-    @Bean
-    public TaskExecutor batchTaskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(props.getBatch().getThreadPoolSize());
-        executor.setMaxPoolSize(props.getBatch().getThreadPoolSize());
-        executor.setQueueCapacity(props.getBatch().getThreadPoolSize() * 2);
-        executor.setThreadNamePrefix("batch-worker-");
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(600);
-        executor.initialize();
-        return executor;
+        return (chunk, contribution) -> transactionTemplate.executeWithoutResult(status -> {
+            try {
+                itemWriter.write(chunk);
+                contribution.incrementWriteCount(chunk.size());
+                contribution.setExitStatus(ExitStatus.COMPLETED);
+            } catch (Exception e) {
+                status.setRollbackOnly();
+                contribution.incrementWriteSkipCount(chunk.size());
+                contribution.setExitStatus(ExitStatus.FAILED.addExitDescription(e.getMessage()));
+            }
+        });
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

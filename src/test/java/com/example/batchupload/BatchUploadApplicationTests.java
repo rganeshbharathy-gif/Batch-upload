@@ -5,7 +5,7 @@ import com.example.batchupload.model.FileRange;
 import com.example.batchupload.reader.ByteRangeFlatFileItemReader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -30,7 +30,6 @@ class BatchUploadApplicationTests {
      */
     @Test
     void readerShouldCoverAllLinesWithNoOverlap() throws Exception {
-        // 12 lines; each line has 5 pipe-separated fields
         List<String> lines = new ArrayList<>();
         for (int i = 0; i < 12; i++) {
             lines.add("csi" + i + "|person" + i + "|CC" + i + "|EC" + i + "|extra" + i);
@@ -55,11 +54,10 @@ class BatchUploadApplicationTests {
             reader.close();
         }
 
-        // All 12 lines should be read exactly once
         assertThat(allRecords).hasSize(12);
         for (int i = 0; i < 12; i++) {
             int finalI = i;
-            assertThat(allRecords).anyMatch(r -> r.getCsiId().equals("csi" + finalI));
+            assertThat(allRecords).anyMatch(r -> r.csiId().equals("csi" + finalI));
         }
     }
 
@@ -72,7 +70,6 @@ class BatchUploadApplicationTests {
             FileRange range = FileRange.forPod(fileSize, i, totalPods);
             coveredBytes += range.length();
         }
-        // Last pod picks up any remainder from integer division
         assertThat(coveredBytes).isEqualTo(fileSize);
     }
 
@@ -97,7 +94,6 @@ class BatchUploadApplicationTests {
     @Test
     void readerShouldSkipMalformedLines() throws Exception {
         Path file = tempDir.resolve("malformed.txt");
-        // Line 2 has only 2 fields, insufficient for index 3
         Files.writeString(file, "a|b|c|d|e\nonly|two\nc|d|e|f|g\n");
 
         FileRange range = FileRange.forPod(Files.size(file), 0, 1);

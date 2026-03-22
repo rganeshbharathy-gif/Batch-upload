@@ -1,6 +1,5 @@
 package com.example.batchupload.config;
 
-import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -9,7 +8,6 @@ import org.springframework.stereotype.Component;
  * All values can be overridden via environment variables using Spring Boot's
  * relaxed binding (e.g. {@code APP_FILE_PATH}, {@code APP_COLUMNS_CSI_ID_INDEX}).
  */
-@Data
 @Component
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
@@ -18,40 +16,45 @@ public class AppProperties {
     private Columns columns = new Columns();
     private Batch batch = new Batch();
 
-    @Data
+    public File getFile() { return file; }
+    public void setFile(File file) { this.file = file; }
+    public Columns getColumns() { return columns; }
+    public void setColumns(Columns columns) { this.columns = columns; }
+    public Batch getBatch() { return batch; }
+    public void setBatch(Batch batch) { this.batch = batch; }
+
     public static class File {
-        /** Absolute path to the input pipe-delimited file (mounted PVC in K8s). */
         private String path = "/data/input.txt";
+        public String getPath() { return path; }
+        public void setPath(String path) { this.path = path; }
     }
 
-    @Data
     public static class Columns {
-        /** Zero-based column index for csi_id in the pipe-delimited file. */
         private int csiIdIndex = 0;
-
-        /** Zero-based column index for person_id in the pipe-delimited file. */
         private int personIdIndex = 1;
-
-        /** Zero-based column index for country_code in the pipe-delimited file. */
         private int countryCodeIndex = 2;
-
-        /** Zero-based column index for economic_code in the pipe-delimited file. */
         private int economicCodeIndex = 3;
+
+        public int getCsiIdIndex() { return csiIdIndex; }
+        public void setCsiIdIndex(int csiIdIndex) { this.csiIdIndex = csiIdIndex; }
+        public int getPersonIdIndex() { return personIdIndex; }
+        public void setPersonIdIndex(int personIdIndex) { this.personIdIndex = personIdIndex; }
+        public int getCountryCodeIndex() { return countryCodeIndex; }
+        public void setCountryCodeIndex(int countryCodeIndex) { this.countryCodeIndex = countryCodeIndex; }
+        public int getEconomicCodeIndex() { return economicCodeIndex; }
+        public void setEconomicCodeIndex(int economicCodeIndex) { this.economicCodeIndex = economicCodeIndex; }
     }
 
-    @Data
     public static class Batch {
-        /**
-         * Number of records processed per JDBC batch insert.
-         * Optimal range for Oracle: 2 000 – 10 000.
-         */
+        /** Rows per JDBC batch insert. Optimal range for Oracle: 2000–10000. */
         private int chunkSize = 5000;
 
-        /**
-         * Number of parallel threads used within this pod.
-         * Each thread reads its own sub-range of the pod's byte range.
-         * Set to 1 to keep it single-threaded (simplest, safest).
-         */
+        /** Number of parallel writer threads for local chunking within this pod. */
         private int threadPoolSize = 4;
+
+        public int getChunkSize() { return chunkSize; }
+        public void setChunkSize(int chunkSize) { this.chunkSize = chunkSize; }
+        public int getThreadPoolSize() { return threadPoolSize; }
+        public void setThreadPoolSize(int threadPoolSize) { this.threadPoolSize = threadPoolSize; }
     }
 }

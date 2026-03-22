@@ -1,5 +1,5 @@
 # ─── Build stage ──────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17-jdk-alpine AS builder
+FROM eclipse-temurin:25-jdk-alpine AS builder
 WORKDIR /workspace
 
 COPY pom.xml .
@@ -13,7 +13,7 @@ RUN apk add --no-cache maven && \
 RUN mvn package -DskipTests -q
 
 # ─── Runtime stage ─────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 
 # Create non-root user for security

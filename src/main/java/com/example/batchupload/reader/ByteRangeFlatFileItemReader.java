@@ -2,19 +2,20 @@ package com.example.batchupload.reader;
 
 import com.example.batchupload.model.DimensionRecord;
 import com.example.batchupload.model.FileRange;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemStreamException;
-import org.springframework.batch.item.support.AbstractItemStreamItemReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ItemStreamException;
+import org.springframework.batch.infrastructure.item.support.AbstractItemStreamItemReader;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.channels.FileChannel;
 
 /**
  * Reads a specific byte range of a pipe-delimited flat file.
@@ -32,9 +33,9 @@ import java.nio.channels.FileChannel;
  * pipe-delimited row. They are configurable via {@code application.yml} so that
  * the implementation never needs to be changed when the upstream file layout changes.
  */
-@Slf4j
 public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<DimensionRecord> {
 
+    private static final Logger log = LoggerFactory.getLogger(ByteRangeFlatFileItemReader.class);
     private static final int BUFFER_SIZE = 128 * 1024; // 128 KB per reader
 
     private final Path filePath;
@@ -46,14 +47,8 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
     private FileChannel fileChannel;
     private BufferedReader reader;
-
-    /** Running byte-position cursor (approximated via line lengths). */
     private long byteCursor;
-
-    /** Count of lines successfully read and parsed. */
     private long linesRead;
-
-    /** Count of lines skipped due to parse errors. */
     private long linesSkipped;
 
     public ByteRangeFlatFileItemReader(
@@ -72,17 +67,12 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         setName(ByteRangeFlatFileItemReader.class.getSimpleName());
     }
 
-    // -------------------------------------------------------------------------
-    // ItemStream lifecycle
-    // -------------------------------------------------------------------------
-
     @Override
     public void open(ExecutionContext executionContext) throws ItemStreamException {
         try {
             fileChannel = FileChannel.open(filePath, StandardOpenOption.READ);
             fileChannel.position(range.startByte());
 
-            // Wrap the channel in a buffered reader for efficient line reading
             reader = new BufferedReader(
                     new InputStreamReader(Channels.newInputStream(fileChannel), StandardCharsets.UTF_8),
                     BUFFER_SIZE);
@@ -93,7 +83,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
             if (range.startByte() > 0) {
                 String partial = reader.readLine();
                 if (partial != null) {
-                    byteCursor += partial.length() + 1; // +1 for '\n'
+                    byteCursor += partial.length() + 1;
                 }
             }
 
@@ -123,16 +113,9 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         }
     }
 
-    // -------------------------------------------------------------------------
-    // ItemReader
-    // -------------------------------------------------------------------------
-
     @Override
     public DimensionRecord read() throws Exception {
         while (true) {
-            // Non-last pods stop when the cursor moves past their end boundary.
-            // We check BEFORE reading the next line so we never steal lines
-            // that belong to the next pod's range.
             if (!range.isLast() && byteCursor >= range.endByte()) {
                 log.debug("Reached end boundary {} at cursor {}", range.endByte(), byteCursor);
                 return null;
@@ -140,23 +123,20 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
             String line = reader.readLine();
             if (line == null) {
-                return null; // EOF
+                return null;
             }
 
-            // Advance cursor (line length + newline byte).
-            // For ASCII/Latin-1 data this is exact; for UTF-8 multi-byte it is an
-            // approximation — acceptable because boundary overlap is at most a few lines.
             byteCursor += line.length() + 1;
 
             if (line.isBlank()) {
                 linesSkipped++;
-                continue; // skip empty lines
+                continue;
             }
 
             DimensionRecord record = parseLine(line);
             if (record == null) {
                 linesSkipped++;
-                continue; // skip malformed lines; logged inside parseLine
+                continue;
             }
 
             linesRead++;
@@ -164,14 +144,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Parsing
-    // -------------------------------------------------------------------------
-
-    private static final int MIN_REQUIRED_COLUMNS_OFFSET = 1; // inclusive index check
-
     private DimensionRecord parseLine(String line) {
-        // Split with limit -1 to preserve trailing empty fields
         String[] fields = line.split("\\|", -1);
 
         int maxIndex = Math.max(Math.max(csiIdIndex, personIdIndex),
@@ -183,12 +156,11 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
             return null;
         }
 
-        DimensionRecord record = new DimensionRecord();
-        record.setCsiId(trim(fields[csiIdIndex]));
-        record.setPersonId(trim(fields[personIdIndex]));
-        record.setCountryCode(trim(fields[countryCodeIndex]));
-        record.setEconomicCode(trim(fields[economicCodeIndex]));
-        return record;
+        return new DimensionRecord(
+                trim(fields[csiIdIndex]),
+                trim(fields[personIdIndex]),
+                trim(fields[countryCodeIndex]),
+                trim(fields[economicCodeIndex]));
     }
 
     private static String trim(String value) {
@@ -196,6 +168,6 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     }
 
     private static String truncate(String s, int max) {
-        return s.length() <= max ? s : s.substring(0, max) + "…";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 }

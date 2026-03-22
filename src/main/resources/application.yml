@@ -10,8 +10,8 @@ spring:
     driver-class-name: oracle.jdbc.OracleDriver
 
     hikari:
-      # One connection per worker thread + a few spare for Spring Batch metadata writes.
-      # Formula: threadPoolSize * pods_per_node + 2 (for metadata)
+      # One connection per writer thread + a few spare for Spring Batch metadata writes.
+      # Formula: threadPoolSize + 2 (for metadata)
       maximum-pool-size: ${HIKARI_MAX_POOL:10}
       minimum-idle: ${HIKARI_MIN_IDLE:4}
       connection-timeout: 30000
@@ -48,7 +48,8 @@ app:
   batch:
     # Rows per JDBC batch insert. Tune for Oracle: 2000–10000 is typical.
     chunk-size: ${CHUNK_SIZE:5000}
-    # Worker threads within this pod. Total concurrency = TOTAL_PODS × threadPoolSize.
+    # Local chunking writer threads within this pod.
+    # Total concurrency = TOTAL_PODS x threadPoolSize.
     thread-pool-size: ${THREAD_POOL_SIZE:4}
 
 # ── Actuator health/readiness for K8s probes ─────────────────────────────
@@ -78,8 +79,6 @@ logging:
     root: INFO
     com.example.batchupload: INFO
     org.springframework.batch: INFO
-    # Set to DEBUG during initial testing; revert to INFO in production
-    # com.example.batchupload.reader: DEBUG
 
 ---
 # ── Test profile: uses H2 in-memory DB instead of Oracle ─────────────────
