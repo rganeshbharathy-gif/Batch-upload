@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: batch-upload-config
+  namespace: batch
+  labels:
+    app: batch-upload
+data:
+  # ── File location ─────────────────────────────────────────────────────────
+  # Must match the mountPath in indexed-job.yaml
+  FILE_PATH: "/data/input.txt"
+
+  # ── Zero-based column indices (pipe-delimited, 250+ columns) ─────────────
+  # Change these to match the actual column positions in your file.
+  CSI_ID_INDEX: "0"
+  PERSON_ID_INDEX: "1"
+  COUNTRY_CODE_INDEX: "2"
+  ECONOMIC_CODE_INDEX: "3"
+
+  # ── Spring Batch tuning ───────────────────────────────────────────────────
+  # Rows per JDBC batch INSERT into Oracle. 5000 is a safe starting point.
+  CHUNK_SIZE: "5000"
+  # Worker threads within each pod (intra-pod parallelism).
+  # Total concurrency = TOTAL_PODS × THREAD_POOL_SIZE
+  THREAD_POOL_SIZE: "4"
+
+  # ── Connection pool ───────────────────────────────────────────────────────
+  # Should be >= THREAD_POOL_SIZE + 2 (for Spring Batch metadata writes)
+  HIKARI_MAX_POOL: "10"
+  HIKARI_MIN_IDLE: "4"
+
+  # ── Logging ───────────────────────────────────────────────────────────────
+  LOGGING_LEVEL_COM_EXAMPLE_BATCHUPLOAD: "INFO"

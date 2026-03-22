@@ -1,0 +1,216 @@
+##############################################################################
+# Kubernetes Indexed Job — Dimension Batch Upload
+#
+# How it works:
+#   • completions = number of pods = number of file partitions
+#   • parallelism = how many pods run simultaneously (set equal to completions
+#     for maximum speed, or lower it to limit DB connection pressure)
+#   • Each pod receives JOB_COMPLETION_INDEX (0-based) automatically.
+#   • TOTAL_PODS must equal spec.completions so each pod calculates its
+#     correct byte range.
+#
+# File sharing:
+#   • All pods mount the same ReadOnlyMany PersistentVolumeClaim (NFS/CephFS).
+#   • The 20 GB file is never copied; each pod seeks to its byte offset.
+#
+# Adjust TOTAL_PODS / completions / parallelism together as a single value.
+##############################################################################
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dimension-batch-upload
+  namespace: batch
+  labels:
+    app: batch-upload
+    version: "1.0.0"
+spec:
+  # ── Parallelism ─────────────────────────────────────────────────────────
+  completions: 5          # <── NUMBER OF PODS (change this to scale up/down)
+  parallelism: 5          # <── Run all pods simultaneously
+  completionMode: Indexed  # enables JOB_COMPLETION_INDEX env var per pod
+
+  # Retry a failed pod up to 2 times before marking the job failed
+  backoffLimit: 2
+
+  # Clean up completed pods after 1 hour (avoids stale pod accumulation)
+  ttlSecondsAfterFinished: 3600
+
+  template:
+    metadata:
+      labels:
+        app: batch-upload
+    spec:
+      restartPolicy: Never   # Let the Job controller handle retries, not kubelet
+
+      # ── Volumes ───────────────────────────────────────────────────────────
+      volumes:
+        - name: input-data
+          persistentVolumeClaim:
+            claimName: batch-input-pvc   # ReadOnlyMany PVC containing input.txt
+            readOnly: true
+
+      # ── Init container: wait for file to be available ────────────────────
+      initContainers:
+        - name: wait-for-file
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until [ -f /data/input.txt ]; do
+                echo "Waiting for /data/input.txt …"
+                sleep 5
+              done
+              echo "File found ($(du -sh /data/input.txt | cut -f1)). Starting."
+          volumeMounts:
+            - name: input-data
+              mountPath: /data
+              readOnly: true
+
+      # ── Main container ────────────────────────────────────────────────────
+      containers:
+        - name: batch-upload
+          image: your-registry/batch-upload:1.0.0   # <── replace with your image
+
+          resources:
+            requests:
+              cpu: "2"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"
+
+          volumeMounts:
+            - name: input-data
+              mountPath: /data
+              readOnly: true
+
+          env:
+            # ── Kubernetes provides this automatically for Indexed Jobs ──────
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+
+            # ── Must equal spec.completions above ────────────────────────────
+            - name: TOTAL_PODS
+              value: "5"    # <── keep in sync with spec.completions
+
+            # ── Application config from ConfigMap ─────────────────────────
+            - name: FILE_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: FILE_PATH
+            - name: CSI_ID_INDEX
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: CSI_ID_INDEX
+            - name: PERSON_ID_INDEX
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: PERSON_ID_INDEX
+            - name: COUNTRY_CODE_INDEX
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: COUNTRY_CODE_INDEX
+            - name: ECONOMIC_CODE_INDEX
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: ECONOMIC_CODE_INDEX
+            - name: CHUNK_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: CHUNK_SIZE
+            - name: THREAD_POOL_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: THREAD_POOL_SIZE
+            - name: HIKARI_MAX_POOL
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: HIKARI_MAX_POOL
+            - name: HIKARI_MIN_IDLE
+              valueFrom:
+                configMapKeyRef:
+                  name: batch-upload-config
+                  key: HIKARI_MIN_IDLE
+
+            # ── Database credentials from Secret ──────────────────────────
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: batch-upload-db-secret
+                  key: DB_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: batch-upload-db-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: batch-upload-db-secret
+                  key: DB_PASSWORD
+
+            # ── JVM tuning for large heap ─────────────────────────────────
+            - name: JAVA_OPTS
+              value: >-
+                -Xms1g
+                -Xmx3g
+                -XX:+UseG1GC
+                -XX:MaxGCPauseMillis=200
+                -XX:+UseStringDeduplication
+
+          # ── Readiness / Liveness probes (Actuator) ───────────────────────
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+
+      # ── Pod anti-affinity: spread pods across nodes for better I/O ───────
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: batch-upload
+                topologyKey: kubernetes.io/hostname
+
+---
+##############################################################################
+# PersistentVolumeClaim — shared read-only storage for the 20 GB input file.
+# Adjust storageClassName to match your cluster's NFS/CephFS provisioner.
+##############################################################################
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: batch-input-pvc
+  namespace: batch
+spec:
+  accessModes:
+    - ReadOnlyMany   # All pods can mount this simultaneously
+  storageClassName: nfs-client    # <── replace with your storage class
+  resources:
+    requests:
+      storage: 25Gi  # slightly larger than the 20 GB file
