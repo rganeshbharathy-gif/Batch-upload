@@ -124,6 +124,13 @@ public class BatchConfig {
                 .build();
     }
 
+    // ── Transaction Manager ──────────────────────────────────────────────────
+
+    @Bean
+    public JdbcTransactionManager transactionManager(DataSource dataSource) {
+        return new JdbcTransactionManager(dataSource);
+    }
+
     // ── TaskExecutor for multi-threaded step ──────────────────────────────────
 
     @Bean
