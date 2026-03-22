@@ -5,9 +5,9 @@ import com.example.batchupload.model.FileRange;
 import com.example.batchupload.service.S3FileService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemStreamException;
-import org.springframework.batch.item.support.AbstractItemStreamItemReader;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ItemStreamException;
+import org.springframework.batch.infrastructure.item.support.AbstractItemStreamItemReader;
 
 import java.io.BufferedReader;
 import java.io.IOException;

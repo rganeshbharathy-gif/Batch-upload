@@ -5,7 +5,7 @@ import com.example.batchupload.model.FileRange;
 import com.example.batchupload.reader.ByteRangeFlatFileItemReader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
 
 import java.io.IOException;
 import java.nio.file.Files;
