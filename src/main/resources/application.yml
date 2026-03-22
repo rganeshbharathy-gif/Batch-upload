@@ -1,0 +1,86 @@
+spring:
+  application:
+    name: batch-upload
+
+  # ── Oracle DataSource ───────────────────────────────────────────────────────
+  datasource:
+    # Thin driver URL: @//host:port/service_name
+    # Override via environment variable or command-line:
+    #   --spring.datasource.url=jdbc:oracle:thin:@//prod-db:1521/ORCL
+    url: ${DB_URL:jdbc:oracle:thin:@//localhost:1521/XEPDB1}
+    username: ${DB_USERNAME:batch_user}
+    password: ${DB_PASSWORD:}
+    driver-class-name: oracle.jdbc.OracleDriver
+
+    hikari:
+      # Match pool size to partition count so every virtual thread has a
+      # dedicated connection and never blocks waiting for one.
+      maximum-pool-size: ${HIKARI_POOL_SIZE:20}
+      minimum-idle: 5
+      connection-timeout: 30000       # 30 s – fail fast if DB is unreachable
+      idle-timeout: 600000            # 10 min
+      max-lifetime: 1800000           # 30 min (< Oracle's dead connection timeout)
+      connection-test-query: SELECT 1 FROM dual
+      # Oracle-specific: disable auto-commit so Spring Batch controls transactions
+      auto-commit: false
+      data-source-properties:
+        # Enable Oracle implicit statement caching (reduces parse overhead)
+        oracle.jdbc.implicitStatementCacheSize: 20
+        # Prefetch rows per round-trip (read side); not relevant for INSERT
+        oracle.jdbc.defaultRowPrefetch: 200
+
+  # ── Spring Batch ────────────────────────────────────────────────────────────
+  batch:
+    job:
+      # Disable automatic job execution on startup.
+      # The JobLauncherRunner triggers the job after validating the file path.
+      enabled: false
+    jdbc:
+      # The schema (BATCH_JOB_INSTANCE, BATCH_STEP_EXECUTION, …) must be
+      # created manually for Oracle. Run src/main/resources/schema-oracle.sql
+      # once, then set this to 'never'.
+      initialize-schema: never
+      # Prefix for Spring Batch metadata tables (change if needed)
+      table-prefix: BATCH_
+
+  # ── Thread config ───────────────────────────────────────────────────────────
+  threads:
+    virtual:
+      enabled: true   # Spring Boot 3.2+ flag – enables virtual threads for
+                      # the embedded server (not batch); set for completeness
+
+# ── Batch job parameters ────────────────────────────────────────────────────
+batch:
+  file:
+    # Absolute path to the pipe-delimited input file.
+    # Override at runtime: --batch.file.path=/data/huge_file.txt
+    path: ${BATCH_FILE_PATH:/data/input.txt}
+    has-header: true
+
+  # Number of file partitions (= number of virtual worker threads).
+  # Rule of thumb: set to the number of available CPU cores × 2, capped by
+  # the Oracle connection pool size.
+  partitions: ${BATCH_PARTITIONS:20}
+
+  # Rows per DB transaction. Higher = faster (fewer round-trips) but more
+  # memory per worker. 5000 is a good default for wide rows.
+  chunk-size: ${BATCH_CHUNK_SIZE:5000}
+
+  # Zero-based column indices in the pipe-delimited source file.
+  # Adjust to match your actual file layout.
+  columns:
+    csi-id: 0
+    person-id: 1
+    country-code: 10
+    economic-code: 25
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+logging:
+  level:
+    root: WARN
+    com.example.batchupload: INFO
+    org.springframework.batch: INFO
+    # Set DEBUG for verbose step/chunk lifecycle events during tuning:
+    # org.springframework.batch.core.step: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} – %msg%n"
