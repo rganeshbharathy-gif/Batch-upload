@@ -44,12 +44,6 @@
             <artifactId>spring-boot-starter-batch-jdbc</artifactId>
         </dependency>
 
-        <!-- Spring Batch Integration: ChunkTaskExecutorItemWriter for local chunking -->
-        <dependency>
-            <groupId>org.springframework.batch</groupId>
-            <artifactId>spring-batch-integration</artifactId>
-        </dependency>
-
         <!-- Oracle JDBC Driver -->
         <dependency>
             <groupId>com.oracle.database.jdbc</groupId>
