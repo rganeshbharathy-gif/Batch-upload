@@ -75,7 +75,7 @@ public class BatchConfig {
     private static final Logger log = LoggerFactory.getLogger(BatchConfig.class);
 
     private static final String INSERT_SQL =
-            "INSERT INTO dimensions (csi_id, person_id, country_code, economic_code) VALUES (?, ?, ?, ?)";
+            "INSERT INTO dimensions (grid_id, csi_id, person_id, country_code, economic_code) VALUES (?, ?, ?, ?, ?)";
 
     @Value("${JOB_COMPLETION_INDEX:0}")
     private int podIndex;
@@ -113,7 +113,7 @@ public class BatchConfig {
     // ── Reader: single-threaded, sequential I/O for the pod's byte range ──────
 
     @Bean
-    public ByteRangeFlatFileItemReader byteRangeReader(AppProperties props, S3FileService s3FileService) {
+    public ByteRangeFlatFileItemReader byteRangeReader(S3FileService s3FileService) {
         long fileSize = s3FileService.getFileSize();
         FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
 
@@ -121,11 +121,7 @@ public class BatchConfig {
                 podIndex, totalPods, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
-        AppProperties.Columns cols = props.columns();
-        return new ByteRangeFlatFileItemReader(
-                s3FileService, podRange,
-                cols.csiIdIndex(), cols.personIdIndex(),
-                cols.countryCodeIndex(), cols.economicCodeIndex());
+        return new ByteRangeFlatFileItemReader(s3FileService, podRange);
     }
 
     // ── Local Chunking: ChunkTaskExecutorItemWriter ──────────────────────────
@@ -162,10 +158,11 @@ public class BatchConfig {
                 .dataSource(dataSource)
                 .sql(INSERT_SQL)
                 .itemPreparedStatementSetter((item, ps) -> {
-                    ps.setString(1, item.csiId());
-                    ps.setString(2, item.personId());
-                    ps.setString(3, item.countryCode());
-                    ps.setString(4, item.economicCode());
+                    ps.setString(1, item.gridId());
+                    ps.setString(2, item.csiId());
+                    ps.setString(3, item.personId());
+                    ps.setString(4, item.countryCode());
+                    ps.setString(5, item.economicCode());
                 })
                 .build();
 

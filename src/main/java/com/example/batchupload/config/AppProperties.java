@@ -8,15 +8,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Spring Boot's relaxed binding (e.g. {@code APP_S3_BUCKET}, {@code APP_COLUMNS_CSI_ID_INDEX}).
  */
 @ConfigurationProperties(prefix = "app")
-public record AppProperties(S3 s3, Columns columns, Batch batch) {
+public record AppProperties(S3 s3, Batch batch) {
 
     public record S3(String bucket, String key, String region) {
         public S3 {
             if (region == null) region = "us-east-1";
         }
-    }
-
-    public record Columns(int csiIdIndex, int personIdIndex, int countryCodeIndex, int economicCodeIndex) {
     }
 
     /**

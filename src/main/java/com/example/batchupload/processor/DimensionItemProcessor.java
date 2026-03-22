@@ -25,6 +25,7 @@ public class DimensionItemProcessor implements ItemProcessor<DimensionRecord, Di
         }
 
         return new DimensionRecord(
+                truncate(item.gridId(), 100),
                 truncate(item.csiId(), 100),
                 truncate(item.personId(), 100),
                 truncate(item.countryCode(), 10),

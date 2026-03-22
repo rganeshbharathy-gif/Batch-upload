@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
  */
 public record DimensionRecord(
         Long id,
+        String gridId,
         String csiId,
         String personId,
         String countryCode,
@@ -16,7 +17,7 @@ public record DimensionRecord(
         LocalDateTime createdAt) {
 
     /** Convenience constructor for inserts — id and createdAt are DB-generated. */
-    public DimensionRecord(String csiId, String personId, String countryCode, String economicCode) {
-        this(null, csiId, personId, countryCode, economicCode, null);
+    public DimensionRecord(String gridId, String csiId, String personId, String countryCode, String economicCode) {
+        this(null, gridId, csiId, personId, countryCode, economicCode, null);
     }
 }

@@ -14,23 +14,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Reads a specific byte range of a pipe-delimited file stored in S3.
  *
+ * <p><b>Header-based column discovery:</b> Pod 0 reads the metadata line and header
+ * line at the top of the file, then builds a column-name-to-index map so that
+ * column positions are never hardcoded. Non-zero pods skip partial lines as before.
+ *
  * <p><b>Byte-boundary handling:</b>
  * <ul>
- *   <li>Uses S3's native byte-range GET so each pod fetches only its slice — no
- *       full-file download required.
- *   <li>If {@code startByte > 0} it skips the first (partial) line so only the pod that
- *       owns the previous range is responsible for that line.
- *   <li>Reads until the current line-based byte cursor exceeds {@code endByte},
- *       except for the last pod which reads to EOF.
+ *   <li>Uses S3's native byte-range GET so each pod fetches only its slice.
+ *   <li>If {@code startByte > 0} it skips the first (partial) line.
+ *   <li>Reads until the byte cursor exceeds {@code endByte}, except for the
+ *       last pod which reads to EOF.
  * </ul>
- *
- * <p><b>Column extraction:</b> Column indices are zero-based positions in the
- * pipe-delimited row. They are configurable via {@code application.yml} so that
- * the implementation never needs to be changed when the upstream file layout changes.
  */
 public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<DimensionRecord> {
 
@@ -39,10 +39,6 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
     private final S3FileService s3FileService;
     private final FileRange range;
-    private final int csiIdIndex;
-    private final int personIdIndex;
-    private final int countryCodeIndex;
-    private final int economicCodeIndex;
 
     private InputStream s3InputStream;
     private BufferedReader reader;
@@ -50,48 +46,115 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private long linesRead;
     private long linesSkipped;
 
-    public ByteRangeFlatFileItemReader(
-            S3FileService s3FileService,
-            FileRange range,
-            int csiIdIndex,
-            int personIdIndex,
-            int countryCodeIndex,
-            int economicCodeIndex) {
+    // Column indices resolved from the header row
+    private int gridIdIndex;
+    private int csiIdIndex;
+    private int countryCodeIndex;
+    private int economicCodeIndex;
+
+    public ByteRangeFlatFileItemReader(S3FileService s3FileService, FileRange range) {
         this.s3FileService = s3FileService;
         this.range = range;
-        this.csiIdIndex = csiIdIndex;
-        this.personIdIndex = personIdIndex;
-        this.countryCodeIndex = countryCodeIndex;
-        this.economicCodeIndex = economicCodeIndex;
         setName(ByteRangeFlatFileItemReader.class.getSimpleName());
     }
 
     @Override
     public void open(ExecutionContext executionContext) throws ItemStreamException {
         try {
-            // S3 range GET fetches only the bytes this pod needs
-            s3InputStream = s3FileService.getInputStream(range.startByte(), range.endByte());
+            if (range.startByte() == 0) {
+                // Pod 0: read from the beginning so we can parse metadata + header
+                s3InputStream = s3FileService.getInputStream(0, range.endByte());
+                reader = new BufferedReader(
+                        new InputStreamReader(s3InputStream, StandardCharsets.UTF_8), BUFFER_SIZE);
 
-            reader = new BufferedReader(
-                    new InputStreamReader(s3InputStream, StandardCharsets.UTF_8),
-                    BUFFER_SIZE);
+                byteCursor = 0;
+                parseHeader();
+            } else {
+                // Non-zero pods: need the header from the start of the file first
+                resolveHeaderFromFileStart();
 
-            byteCursor = range.startByte();
+                // Now open the actual byte range for data reading
+                s3InputStream = s3FileService.getInputStream(range.startByte(), range.endByte());
+                reader = new BufferedReader(
+                        new InputStreamReader(s3InputStream, StandardCharsets.UTF_8), BUFFER_SIZE);
 
-            // Skip the partial line that "belongs" to the previous pod
-            if (range.startByte() > 0) {
+                byteCursor = range.startByte();
+
+                // Skip the partial line that "belongs" to the previous pod
                 String partial = reader.readLine();
                 if (partial != null) {
                     byteCursor += partial.length() + 1;
                 }
             }
 
-            log.info("Opened S3 reader — startByte={} endByte={} isLast={}",
-                    range.startByte(), range.endByte(), range.isLast());
+            log.info("Opened S3 reader — startByte={} endByte={} isLast={} columns=[GRID_ID={}, CSI_ID={}, CTY_OF_CTZN_CD={}, ECON_SEC_CD={}]",
+                    range.startByte(), range.endByte(), range.isLast(),
+                    gridIdIndex, csiIdIndex, countryCodeIndex, economicCodeIndex);
 
         } catch (IOException e) {
             throw new ItemStreamException("Cannot open S3 stream", e);
         }
+    }
+
+    /**
+     * Reads the first two lines of the file (metadata + header) to discover column indices.
+     * Called inline for pod 0 since it already reads from byte 0.
+     */
+    private void parseHeader() throws IOException {
+        // Line 1: metadata — skip it
+        String metaData = reader.readLine();
+        if (metaData != null) {
+            byteCursor += metaData.length() + 1;
+        }
+
+        // Line 2: header row with column names
+        String header = reader.readLine();
+        if (header == null) {
+            throw new IOException("File has no header row");
+        }
+        byteCursor += header.length() + 1;
+
+        resolveColumnIndices(header);
+    }
+
+    /**
+     * For non-zero pods: makes a small S3 range request to read just the header,
+     * then closes that stream before opening the real data stream.
+     */
+    private void resolveHeaderFromFileStart() throws IOException {
+        // Read enough bytes to cover metadata + header (first 8 KB should be plenty)
+        try (InputStream headerStream = s3FileService.getInputStream(0, 8192);
+             BufferedReader headerReader = new BufferedReader(
+                     new InputStreamReader(headerStream, StandardCharsets.UTF_8))) {
+
+            headerReader.readLine(); // skip metadata
+            String header = headerReader.readLine();
+            if (header == null) {
+                throw new IOException("File has no header row");
+            }
+            resolveColumnIndices(header);
+        }
+    }
+
+    private void resolveColumnIndices(String header) {
+        String[] columns = header.split("\\|", -1);
+        Map<String, Integer> idx = new HashMap<>();
+        for (int i = 0; i < columns.length; i++) {
+            idx.put(columns[i].trim(), i);
+        }
+
+        gridIdIndex = requireColumn(idx, "GRID_ID");
+        csiIdIndex = requireColumn(idx, "CSI_ID");
+        countryCodeIndex = requireColumn(idx, "CTY_OF_CTZN_CD");
+        economicCodeIndex = requireColumn(idx, "ECON_SEC_CD");
+    }
+
+    private static int requireColumn(Map<String, Integer> idx, String name) {
+        Integer index = idx.get(name);
+        if (index == null) {
+            throw new ItemStreamException("Required column '" + name + "' not found in header. Available: " + idx.keySet());
+        }
+        return index;
     }
 
     @Override
@@ -146,7 +209,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private DimensionRecord parseLine(String line) {
         String[] fields = line.split("\\|", -1);
 
-        int maxIndex = Math.max(Math.max(csiIdIndex, personIdIndex),
+        int maxIndex = Math.max(Math.max(gridIdIndex, csiIdIndex),
                 Math.max(countryCodeIndex, economicCodeIndex));
 
         if (fields.length <= maxIndex) {
@@ -156,8 +219,9 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         }
 
         return new DimensionRecord(
+                trim(fields[gridIdIndex]),
                 trim(fields[csiIdIndex]),
-                trim(fields[personIdIndex]),
+                trim(fields[csiIdIndex]),   // CSI_ID maps to personId
                 trim(fields[countryCodeIndex]),
                 trim(fields[economicCodeIndex]));
     }

@@ -8,6 +8,7 @@
 -- -----------------------------------------------------------------------------
 CREATE TABLE dimensions (
     id             NUMBER         GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    grid_id        VARCHAR2(100),
     csi_id         VARCHAR2(100),
     person_id      VARCHAR2(100),
     country_code   VARCHAR2(10),
