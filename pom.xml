@@ -22,7 +22,20 @@
     <properties>
         <java.version>25</java.version>
         <oracle.jdbc.version>23.6.0.24.10</oracle.jdbc.version>
+        <aws.sdk.version>2.31.1</aws.sdk.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Spring Batch with JDBC-backed metadata (new in Spring Boot 4) -->
@@ -51,6 +64,12 @@
             <artifactId>ucp</artifactId>
             <version>${oracle.jdbc.version}</version>
             <scope>runtime</scope>
+        </dependency>
+
+        <!-- AWS S3 SDK -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
         </dependency>
 
         <!-- Actuator for K8s health probes -->

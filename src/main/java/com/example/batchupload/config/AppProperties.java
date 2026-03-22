@@ -12,21 +12,28 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
 
-    private File file = new File();
+    private S3 s3 = new S3();
     private Columns columns = new Columns();
     private Batch batch = new Batch();
 
-    public File getFile() { return file; }
-    public void setFile(File file) { this.file = file; }
+    public S3 getS3() { return s3; }
+    public void setS3(S3 s3) { this.s3 = s3; }
     public Columns getColumns() { return columns; }
     public void setColumns(Columns columns) { this.columns = columns; }
     public Batch getBatch() { return batch; }
     public void setBatch(Batch batch) { this.batch = batch; }
 
-    public static class File {
-        private String path = "/data/input.txt";
-        public String getPath() { return path; }
-        public void setPath(String path) { this.path = path; }
+    public static class S3 {
+        private String bucket;
+        private String key;
+        private String region = "us-east-1";
+
+        public String getBucket() { return bucket; }
+        public void setBucket(String bucket) { this.bucket = bucket; }
+        public String getKey() { return key; }
+        public void setKey(String key) { this.key = key; }
+        public String getRegion() { return region; }
+        public void setRegion(String region) { this.region = region; }
     }
 
     public static class Columns {

@@ -2,6 +2,7 @@ package com.example.batchupload.reader;
 
 import com.example.batchupload.model.DimensionRecord;
 import com.example.batchupload.model.FileRange;
+import com.example.batchupload.service.S3FileService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
@@ -10,19 +11,17 @@ import org.springframework.batch.infrastructure.item.support.AbstractItemStreamI
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.nio.channels.Channels;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 
 /**
- * Reads a specific byte range of a pipe-delimited flat file.
+ * Reads a specific byte range of a pipe-delimited file stored in S3.
  *
  * <p><b>Byte-boundary handling:</b>
  * <ul>
- *   <li>Seeks the {@link FileChannel} directly to {@code startByte} — O(1), no data reading.
+ *   <li>Uses S3's native byte-range GET so each pod fetches only its slice — no
+ *       full-file download required.
  *   <li>If {@code startByte > 0} it skips the first (partial) line so only the pod that
  *       owns the previous range is responsible for that line.
  *   <li>Reads until the current line-based byte cursor exceeds {@code endByte},
@@ -38,27 +37,27 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private static final Logger log = LoggerFactory.getLogger(ByteRangeFlatFileItemReader.class);
     private static final int BUFFER_SIZE = 128 * 1024; // 128 KB per reader
 
-    private final Path filePath;
+    private final S3FileService s3FileService;
     private final FileRange range;
     private final int csiIdIndex;
     private final int personIdIndex;
     private final int countryCodeIndex;
     private final int economicCodeIndex;
 
-    private FileChannel fileChannel;
+    private InputStream s3InputStream;
     private BufferedReader reader;
     private long byteCursor;
     private long linesRead;
     private long linesSkipped;
 
     public ByteRangeFlatFileItemReader(
-            Path filePath,
+            S3FileService s3FileService,
             FileRange range,
             int csiIdIndex,
             int personIdIndex,
             int countryCodeIndex,
             int economicCodeIndex) {
-        this.filePath = filePath;
+        this.s3FileService = s3FileService;
         this.range = range;
         this.csiIdIndex = csiIdIndex;
         this.personIdIndex = personIdIndex;
@@ -70,11 +69,11 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     @Override
     public void open(ExecutionContext executionContext) throws ItemStreamException {
         try {
-            fileChannel = FileChannel.open(filePath, StandardOpenOption.READ);
-            fileChannel.position(range.startByte());
+            // S3 range GET fetches only the bytes this pod needs
+            s3InputStream = s3FileService.getInputStream(range.startByte(), range.endByte());
 
             reader = new BufferedReader(
-                    new InputStreamReader(Channels.newInputStream(fileChannel), StandardCharsets.UTF_8),
+                    new InputStreamReader(s3InputStream, StandardCharsets.UTF_8),
                     BUFFER_SIZE);
 
             byteCursor = range.startByte();
@@ -87,11 +86,11 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
                 }
             }
 
-            log.info("Opened reader — file={} startByte={} endByte={} isLast={}",
-                    filePath, range.startByte(), range.endByte(), range.isLast());
+            log.info("Opened S3 reader — startByte={} endByte={} isLast={}",
+                    range.startByte(), range.endByte(), range.isLast());
 
         } catch (IOException e) {
-            throw new ItemStreamException("Cannot open file: " + filePath, e);
+            throw new ItemStreamException("Cannot open S3 stream", e);
         }
     }
 
@@ -105,11 +104,11 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     public void close() throws ItemStreamException {
         try {
             if (reader != null) reader.close();
-            if (fileChannel != null) fileChannel.close();
-            log.info("Closed reader — linesRead={} linesSkipped={} finalCursor={}",
+            if (s3InputStream != null) s3InputStream.close();
+            log.info("Closed S3 reader — linesRead={} linesSkipped={} finalCursor={}",
                     linesRead, linesSkipped, byteCursor);
         } catch (IOException e) {
-            throw new ItemStreamException("Cannot close file: " + filePath, e);
+            throw new ItemStreamException("Cannot close S3 stream", e);
         }
     }
 

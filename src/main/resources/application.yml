@@ -33,9 +33,10 @@ spring:
 
 # ── Application properties ────────────────────────────────────────────────
 app:
-  file:
-    # Mount path of the shared PersistentVolumeClaim in K8s
-    path: ${FILE_PATH:/data/input.txt}
+  s3:
+    bucket: ${S3_BUCKET}
+    key: ${S3_KEY}
+    region: ${AWS_REGION:us-east-1}
 
   columns:
     # Zero-based column indices in the pipe-delimited file.

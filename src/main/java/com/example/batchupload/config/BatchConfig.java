@@ -4,6 +4,7 @@ import com.example.batchupload.model.DimensionRecord;
 import com.example.batchupload.model.FileRange;
 import com.example.batchupload.processor.DimensionItemProcessor;
 import com.example.batchupload.reader.ByteRangeFlatFileItemReader;
+import com.example.batchupload.service.S3FileService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.ExitStatus;
@@ -24,9 +25,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 /**
  * Spring Batch 6 configuration for the Dimension Load job using <b>local chunking</b>.
@@ -54,8 +52,8 @@ import java.nio.file.Path;
  *
  * <h2>Parallelism</h2>
  * <ul>
- *   <li><b>Cross-pod</b>: Each K8s pod reads a distinct byte range of the shared file.
- *       {@code JOB_COMPLETION_INDEX} and {@code TOTAL_PODS} drive the split.
+ *   <li><b>Cross-pod</b>: Each K8s pod reads a distinct byte range of the S3 object
+ *       using S3's native range-GET. {@code JOB_COMPLETION_INDEX} and {@code TOTAL_PODS} drive the split.
  *   <li><b>Within-pod (local chunking)</b>: A single reader thread produces chunks
  *       sequentially (optimal for disk I/O). Each chunk is dispatched via
  *       {@link ChunkTaskExecutorItemWriter} to a pool of writer threads.
@@ -115,18 +113,17 @@ public class BatchConfig {
     // ── Reader: single-threaded, sequential I/O for the pod's byte range ──────
 
     @Bean
-    public ByteRangeFlatFileItemReader byteRangeReader(AppProperties props) {
-        Path filePath = Path.of(props.getFile().getPath());
-        long fileSize = resolveFileSize(filePath);
+    public ByteRangeFlatFileItemReader byteRangeReader(AppProperties props, S3FileService s3FileService) {
+        long fileSize = s3FileService.getFileSize();
         FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
 
-        log.info("Pod {}/{} — file size={} bytes, range=[{}, {}), isLast={}",
+        log.info("Pod {}/{} — S3 file size={} bytes, range=[{}, {}), isLast={}",
                 podIndex, totalPods, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
         AppProperties.Columns cols = props.getColumns();
         return new ByteRangeFlatFileItemReader(
-                filePath, podRange,
+                s3FileService, podRange,
                 cols.getCsiIdIndex(), cols.getPersonIdIndex(),
                 cols.getCountryCodeIndex(), cols.getEconomicCodeIndex());
     }
@@ -185,13 +182,4 @@ public class BatchConfig {
         });
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static long resolveFileSize(Path path) {
-        try {
-            return Files.size(path);
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot read file size for: " + path, e);
-        }
-    }
 }
