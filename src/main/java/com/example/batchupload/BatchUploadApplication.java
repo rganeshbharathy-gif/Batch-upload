@@ -37,8 +37,8 @@ public class BatchUploadApplication implements ApplicationRunner {
          * A unique run.id prevents Spring Batch from treating this as
          * a duplicate job instance across pods.
          */
-        String podIndex = System.getenv().getOrDefault("JOB_COMPLETION_INDEX", "0");
-        String totalPods = System.getenv().getOrDefault("TOTAL_PODS", "1");
+        String podIndex = "0";
+        String totalPods = "1";
 
         JobParameters params = new JobParametersBuilder()
                 .addString("pod.index", podIndex)

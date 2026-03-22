@@ -17,7 +17,6 @@ import org.springframework.batch.core.step.item.ChunkProcessor;
 import org.springframework.batch.infrastructure.item.database.JdbcBatchItemWriter;
 import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.integration.chunk.ChunkTaskExecutorItemWriter;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.support.JdbcTransactionManager;
@@ -77,17 +76,14 @@ public class BatchConfig {
     private static final String INSERT_SQL =
             "INSERT INTO dimensions (grid_id, person_id, country_code, sector_code) VALUES (?, ?, ?, ?)";
 
-    @Value("${JOB_COMPLETION_INDEX:0}")
-    private int podIndex;
-
-    @Value("${TOTAL_PODS:1}")
-    private int totalPods;
+    private static final int POD_INDEX = 0;
+    private static final int TOTAL_PODS = 1;
 
     // ── Job ───────────────────────────────────────────────────────────────────
 
     @Bean
     public Job dimensionLoadJob(JobRepository jobRepository, Step loadStep) {
-        return new JobBuilder("dimensionLoadJob-pod" + podIndex, jobRepository)
+        return new JobBuilder("dimensionLoadJob-pod" + POD_INDEX, jobRepository)
                 .start(loadStep)
                 .build();
     }
@@ -117,10 +113,10 @@ public class BatchConfig {
     @Bean
     public ByteRangeFlatFileItemReader byteRangeReader(S3FileService s3FileService) {
         long fileSize = s3FileService.getFileSize();
-        FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
+        FileRange podRange = FileRange.forPod(fileSize, POD_INDEX, TOTAL_PODS);
 
         log.info("Pod {}/{} — S3 file size={} bytes, range=[{}, {}), isLast={}",
-                podIndex, totalPods, fileSize,
+                POD_INDEX, TOTAL_PODS, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
         return new ByteRangeFlatFileItemReader(s3FileService, podRange);
