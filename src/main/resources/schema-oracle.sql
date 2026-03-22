@@ -9,19 +9,18 @@
 CREATE TABLE dimensions (
     id             NUMBER         GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     grid_id        VARCHAR2(100),
-    csi_id         VARCHAR2(100),
     person_id      VARCHAR2(100),
     country_code   VARCHAR2(10),
-    economic_code  VARCHAR2(50),
+    sector_code    VARCHAR2(50),
     created_at     TIMESTAMP      DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 -- Index to support queries by the four business columns
-CREATE INDEX idx_dim_csi_person
-    ON dimensions (csi_id, person_id);
+CREATE INDEX idx_dim_grid_person
+    ON dimensions (grid_id, person_id);
 
-CREATE INDEX idx_dim_country_economic
-    ON dimensions (country_code, economic_code);
+CREATE INDEX idx_dim_country_sector
+    ON dimensions (country_code, sector_code);
 
 -- -----------------------------------------------------------------------------
 -- 2. Spring Batch metadata tables (Oracle dialect)

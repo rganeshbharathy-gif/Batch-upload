@@ -48,9 +48,9 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
     // Column indices resolved from the header row
     private int gridIdIndex;
-    private int csiIdIndex;
+    private int personIdIndex;
     private int countryCodeIndex;
-    private int economicCodeIndex;
+    private int sectorCodeIndex;
 
     public ByteRangeFlatFileItemReader(S3FileService s3FileService, FileRange range) {
         this.s3FileService = s3FileService;
@@ -87,9 +87,9 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
                 }
             }
 
-            log.info("Opened S3 reader — startByte={} endByte={} isLast={} columns=[GRID_ID={}, CSI_ID={}, CTY_OF_CTZN_CD={}, ECON_SEC_CD={}]",
+            log.info("Opened S3 reader — startByte={} endByte={} isLast={} columns=[GRID_ID={}, PERSON_ID={}, COUNTRY_CODE={}, SECTOR_CODE={}]",
                     range.startByte(), range.endByte(), range.isLast(),
-                    gridIdIndex, csiIdIndex, countryCodeIndex, economicCodeIndex);
+                    gridIdIndex, personIdIndex, countryCodeIndex, sectorCodeIndex);
 
         } catch (IOException e) {
             throw new ItemStreamException("Cannot open S3 stream", e);
@@ -144,9 +144,9 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         }
 
         gridIdIndex = requireColumn(idx, "GRID_ID");
-        csiIdIndex = requireColumn(idx, "CSI_ID");
-        countryCodeIndex = requireColumn(idx, "CTY_OF_CTZN_CD");
-        economicCodeIndex = requireColumn(idx, "ECON_SEC_CD");
+        personIdIndex = requireColumn(idx, "PERSON_ID");
+        countryCodeIndex = requireColumn(idx, "COUNTRY_CODE");
+        sectorCodeIndex = requireColumn(idx, "SECTOR_CODE");
     }
 
     private static int requireColumn(Map<String, Integer> idx, String name) {
@@ -209,8 +209,8 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private DimensionRecord parseLine(String line) {
         String[] fields = line.split("\\|", -1);
 
-        int maxIndex = Math.max(Math.max(gridIdIndex, csiIdIndex),
-                Math.max(countryCodeIndex, economicCodeIndex));
+        int maxIndex = Math.max(Math.max(gridIdIndex, personIdIndex),
+                Math.max(countryCodeIndex, sectorCodeIndex));
 
         if (fields.length <= maxIndex) {
             log.warn("Skipping malformed line (only {} fields, need at least {}): [{}...]",
@@ -220,10 +220,9 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
         return new DimensionRecord(
                 trim(fields[gridIdIndex]),
-                trim(fields[csiIdIndex]),
-                trim(fields[csiIdIndex]),   // CSI_ID maps to personId
+                trim(fields[personIdIndex]),
                 trim(fields[countryCodeIndex]),
-                trim(fields[economicCodeIndex]));
+                trim(fields[sectorCodeIndex]));
     }
 
     private static String trim(String value) {

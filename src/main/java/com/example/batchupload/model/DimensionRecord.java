@@ -10,14 +10,13 @@ import java.time.LocalDateTime;
 public record DimensionRecord(
         Long id,
         String gridId,
-        String csiId,
         String personId,
         String countryCode,
-        String economicCode,
+        String sectorCode,
         LocalDateTime createdAt) {
 
     /** Convenience constructor for inserts — id and createdAt are DB-generated. */
-    public DimensionRecord(String gridId, String csiId, String personId, String countryCode, String economicCode) {
-        this(null, gridId, csiId, personId, countryCode, economicCode, null);
+    public DimensionRecord(String gridId, String personId, String countryCode, String sectorCode) {
+        this(null, gridId, personId, countryCode, sectorCode, null);
     }
 }

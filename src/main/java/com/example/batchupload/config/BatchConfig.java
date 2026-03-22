@@ -75,7 +75,7 @@ public class BatchConfig {
     private static final Logger log = LoggerFactory.getLogger(BatchConfig.class);
 
     private static final String INSERT_SQL =
-            "INSERT INTO dimensions (grid_id, csi_id, person_id, country_code, economic_code) VALUES (?, ?, ?, ?, ?)";
+            "INSERT INTO dimensions (grid_id, person_id, country_code, sector_code) VALUES (?, ?, ?, ?)";
 
     @Value("${JOB_COMPLETION_INDEX:0}")
     private int podIndex;
@@ -159,10 +159,9 @@ public class BatchConfig {
                 .sql(INSERT_SQL)
                 .itemPreparedStatementSetter((item, ps) -> {
                     ps.setString(1, item.gridId());
-                    ps.setString(2, item.csiId());
-                    ps.setString(3, item.personId());
-                    ps.setString(4, item.countryCode());
-                    ps.setString(5, item.economicCode());
+                    ps.setString(2, item.personId());
+                    ps.setString(3, item.countryCode());
+                    ps.setString(4, item.sectorCode());
                 })
                 .build();
 
