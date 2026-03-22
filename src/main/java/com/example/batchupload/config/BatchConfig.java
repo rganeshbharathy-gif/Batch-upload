@@ -102,7 +102,7 @@ public class BatchConfig {
                          DimensionItemProcessor itemProcessor,
                          ChunkTaskExecutorItemWriter<DimensionRecord> localChunkWriter) {
         return new StepBuilder("loadStep", jobRepository)
-                .<DimensionRecord, DimensionRecord>chunk(props.getBatch().getChunkSize())
+                .<DimensionRecord, DimensionRecord>chunk(props.batch().chunkSize())
                 .transactionManager(transactionManager)
                 .reader(itemReader)
                 .processor(itemProcessor)
@@ -121,11 +121,11 @@ public class BatchConfig {
                 podIndex, totalPods, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
-        AppProperties.Columns cols = props.getColumns();
+        AppProperties.Columns cols = props.columns();
         return new ByteRangeFlatFileItemReader(
                 s3FileService, podRange,
-                cols.getCsiIdIndex(), cols.getPersonIdIndex(),
-                cols.getCountryCodeIndex(), cols.getEconomicCodeIndex());
+                cols.csiIdIndex(), cols.personIdIndex(),
+                cols.countryCodeIndex(), cols.economicCodeIndex());
     }
 
     // ── Local Chunking: ChunkTaskExecutorItemWriter ──────────────────────────
@@ -143,8 +143,8 @@ public class BatchConfig {
             AppProperties props) {
 
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
-        taskExecutor.setCorePoolSize(props.getBatch().getThreadPoolSize());
-        taskExecutor.setMaxPoolSize(props.getBatch().getThreadPoolSize());
+        taskExecutor.setCorePoolSize(props.batch().threadPoolSize());
+        taskExecutor.setMaxPoolSize(props.batch().threadPoolSize());
         taskExecutor.setThreadNamePrefix("chunk-writer-");
         taskExecutor.setWaitForTasksToCompleteOnShutdown(true);
         taskExecutor.setAwaitTerminationSeconds(600);

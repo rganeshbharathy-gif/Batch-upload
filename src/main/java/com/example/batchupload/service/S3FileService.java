@@ -21,11 +21,11 @@ public class S3FileService {
     private final String key;
 
     public S3FileService(AppProperties props) {
-        AppProperties.S3 s3Props = props.getS3();
-        this.bucket = s3Props.getBucket();
-        this.key = s3Props.getKey();
+        AppProperties.S3 s3Props = props.s3();
+        this.bucket = s3Props.bucket();
+        this.key = s3Props.key();
         this.s3Client = S3Client.builder()
-                .region(Region.of(s3Props.getRegion()))
+                .region(Region.of(s3Props.region()))
                 .build();
     }
 
