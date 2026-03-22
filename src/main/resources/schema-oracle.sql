@@ -25,6 +25,24 @@ CREATE INDEX idx_dim_country_code ON dimensions (country_code);
 -- ALTER TABLE dimensions NOLOGGING;
 
 
+-- ── ShedLock table ───────────────────────────────────────────────────────────
+--
+-- One row per lock name. Columns:
+--   name        – unique lock identifier (≤ 64 chars, matches LOCK_NAME constant)
+--   lock_until  – the lock is considered released after this timestamp;
+--                 the extension service pushes this forward periodically
+--   locked_at   – when the lock was first acquired (informational)
+--   locked_by   – hostname:thread-name of the owner (informational)
+--
+CREATE TABLE shedlock (
+    name        VARCHAR2(64)  NOT NULL,
+    lock_until  TIMESTAMP     NOT NULL,
+    locked_at   TIMESTAMP     NOT NULL,
+    locked_by   VARCHAR2(255) NOT NULL,
+    CONSTRAINT pk_shedlock PRIMARY KEY (name)
+);
+
+
 -- ── Spring Batch metadata tables (Oracle dialect) ─────────────────────────
 -- Source: spring-batch-core jar → org/springframework/batch/core/schema-oracle10g.sql
 -- Only needed once per schema. Spring Boot sets initialize-schema=never so

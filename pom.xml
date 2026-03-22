@@ -56,10 +56,28 @@
             <optional>true</optional>
         </dependency>
 
+        <!--
+            ShedLock – distributed lock for scheduled / batch jobs.
+            shedlock-spring  : @EnableSchedulerLock, LockingTaskExecutor, LockExtender.
+            shedlock-provider-jdbc-template : stores lock rows in the DB (works with Oracle).
+            Keep both versions in sync.
+        -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <version>6.3.0</version>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-jdbc-template</artifactId>
+            <version>6.3.0</version>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <!-- Includes JUnit 5, AssertJ, and Mockito -->
             <scope>test</scope>
         </dependency>
         <dependency>

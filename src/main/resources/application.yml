@@ -74,6 +74,33 @@ batch:
     country-code: 10
     economic-code: 25
 
+# ── ShedLock ─────────────────────────────────────────────────────────────────
+#
+# Rolling-extension model for long-running batch jobs:
+#
+#  acquire lock  ──────────────────────────────────────────────────►  unlock
+#  |   lockAtMostFor (30 min)    |   +30 min    |   +30 min    |
+#  |←────────────────────────────|              |              |
+#                    ↑                ↑               ↑
+#              extend (10 min)  extend (10 min)  extend (10 min)
+#
+# Rules of thumb:
+#   extension-interval  < extension-duration / 2
+#   lock-at-least-for   ≥ one cron trigger interval (prevents double-fire)
+#
+shedlock:
+  # How far ahead to push lock_until on each extension call.
+  # The lock is always this far from expiry.
+  extension-duration: PT30M     # 30 minutes
+
+  # How often the background virtual thread extends the lock.
+  # Must be < extension-duration so the lock never expires between renewals.
+  extension-interval: PT10M     # 10 minutes
+
+  # Minimum hold time after a fast (or crashing) run.
+  # Prevents two cron triggers close together from both executing.
+  lock-at-least-for: PT5M       # 5 minutes
+
 # ── Logging ─────────────────────────────────────────────────────────────────
 logging:
   level:
