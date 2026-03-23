@@ -39,6 +39,8 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
     private final S3FileService s3FileService;
     private final FileRange range;
+    private final String bucket;
+    private final String s3Key;
 
     private InputStream s3InputStream;
     private BufferedReader reader;
@@ -52,9 +54,12 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private int countryCodeIndex;
     private int sectorCodeIndex;
 
-    public ByteRangeFlatFileItemReader(S3FileService s3FileService, FileRange range) {
+    public ByteRangeFlatFileItemReader(S3FileService s3FileService, FileRange range,
+                                       String bucket, String s3Key) {
         this.s3FileService = s3FileService;
         this.range = range;
+        this.bucket = bucket;
+        this.s3Key = s3Key;
         setName(ByteRangeFlatFileItemReader.class.getSimpleName());
     }
 
@@ -63,7 +68,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         try {
             if (range.startByte() == 0) {
                 // Pod 0: read from the beginning so we can parse metadata + header
-                s3InputStream = s3FileService.getInputStream(0, range.endByte());
+                s3InputStream = s3FileService.getInputStream(bucket, s3Key, 0, range.endByte());
                 reader = new BufferedReader(
                         new InputStreamReader(s3InputStream, StandardCharsets.UTF_8), BUFFER_SIZE);
 
@@ -74,7 +79,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
                 resolveHeaderFromFileStart();
 
                 // Now open the actual byte range for data reading
-                s3InputStream = s3FileService.getInputStream(range.startByte(), range.endByte());
+                s3InputStream = s3FileService.getInputStream(bucket, s3Key, range.startByte(), range.endByte());
                 reader = new BufferedReader(
                         new InputStreamReader(s3InputStream, StandardCharsets.UTF_8), BUFFER_SIZE);
 
@@ -123,7 +128,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
      */
     private void resolveHeaderFromFileStart() throws IOException {
         // Read enough bytes to cover metadata + header (first 8 KB should be plenty)
-        try (InputStream headerStream = s3FileService.getInputStream(0, 8192);
+        try (InputStream headerStream = s3FileService.getInputStream(bucket, s3Key, 0, 8192);
              BufferedReader headerReader = new BufferedReader(
                      new InputStreamReader(headerStream, StandardCharsets.UTF_8))) {
 

@@ -33,6 +33,8 @@ public class JobScheduler {
             JobParameters params = new JobParametersBuilder()
                     .addString("pod.index", podIndex)
                     .addString("total.pods", totalPods)
+                    .addString("s3.bucket", "my-bucket")
+                    .addString("s3.key", "data/dimensions.dat")
                     .addString("run.id", UUID.randomUUID().toString())
                     .toJobParameters();
 

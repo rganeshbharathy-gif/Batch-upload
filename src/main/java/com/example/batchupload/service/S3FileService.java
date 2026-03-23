@@ -15,8 +15,6 @@ import java.io.InputStream;
 @Service
 public class S3FileService {
 
-    private static final String BUCKET = "my-bucket";
-    private static final String KEY = "data/dimensions.dat";
     private static final String REGION = "us-east-1";
 
     private final S3Client s3Client;
@@ -28,27 +26,29 @@ public class S3FileService {
     }
 
     /** Returns the total size of the S3 object in bytes. */
-    public long getFileSize() {
+    public long getFileSize(String bucket, String key) {
         return s3Client.headObject(HeadObjectRequest.builder()
-                .bucket(BUCKET)
-                .key(KEY)
+                .bucket(bucket)
+                .key(key)
                 .build()).contentLength();
     }
 
     /**
      * Returns an InputStream for the specified byte range of the S3 object.
      *
+     * @param bucket    S3 bucket name
+     * @param key       S3 object key (file path)
      * @param startByte inclusive start offset
      * @param endByte   exclusive end offset; pass -1 or file-size to read to EOF
      */
-    public InputStream getInputStream(long startByte, long endByte) {
+    public InputStream getInputStream(String bucket, String key, long startByte, long endByte) {
         String range = (endByte <= startByte)
                 ? String.format("bytes=%d-", startByte)
                 : String.format("bytes=%d-%d", startByte, endByte - 1); // S3 range is inclusive
 
         return s3Client.getObject(GetObjectRequest.builder()
-                .bucket(BUCKET)
-                .key(KEY)
+                .bucket(bucket)
+                .key(key)
                 .range(range)
                 .build());
     }
