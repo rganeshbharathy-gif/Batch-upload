@@ -78,6 +78,12 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
+        <!-- Liquibase for database migrations -->
+        <dependency>
+            <groupId>org.liquibase</groupId>
+            <artifactId>liquibase-core</artifactId>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

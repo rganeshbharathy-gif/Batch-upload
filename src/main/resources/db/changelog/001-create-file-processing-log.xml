@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- ================================================================== -->
+    <!-- Tracks S3 files picked up by the scheduler so that subsequent      -->
+    <!-- executions (every 10 min) do not reprocess the same file.          -->
+    <!-- ================================================================== -->
+    <changeSet id="001" author="batch-upload">
+        <createTable tableName="FILE_PROCESSING_LOG">
+            <column name="ID" type="NUMBER" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="FILE_NAME" type="VARCHAR2(1024)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="S3_BUCKET" type="VARCHAR2(255)"/>
+            <column name="S3_KEY" type="VARCHAR2(1024)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="FILE_SIZE" type="NUMBER(19,0)"/>
+            <column name="STATUS" type="VARCHAR2(20)" defaultValue="PROCESSING">
+                <constraints nullable="false"/>
+            </column>
+            <column name="PICKED_BY_POD" type="VARCHAR2(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="JOB_EXECUTION_ID" type="NUMBER(19,0)"/>
+            <column name="ROW_COUNT" type="NUMBER(19,0)" defaultValueNumeric="0"/>
+            <column name="ERROR_MESSAGE" type="VARCHAR2(4000)"/>
+            <column name="STARTED_AT" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="FINISHED_AT" type="TIMESTAMP"/>
+        </createTable>
+
+        <!-- Prevent two pods/executions from picking the same file -->
+        <addUniqueConstraint
+                tableName="FILE_PROCESSING_LOG"
+                columnNames="S3_BUCKET, S3_KEY"
+                constraintName="UQ_FILE_PROCESSING_S3"/>
+
+        <createIndex tableName="FILE_PROCESSING_LOG" indexName="IDX_FILE_LOG_STATUS">
+            <column name="STATUS"/>
+        </createIndex>
+
+        <createIndex tableName="FILE_PROCESSING_LOG" indexName="IDX_FILE_LOG_STARTED">
+            <column name="STARTED_AT"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ================================================================== -->
+    <!-- Allow reprocessing of FAILED files by resetting their status.      -->
+    <!-- The scheduler query: SELECT ... WHERE STATUS NOT IN                -->
+    <!--   ('PROCESSING','COMPLETED') OR status IS NULL                     -->
+    <!-- ================================================================== -->
+
+</databaseChangeLog>
