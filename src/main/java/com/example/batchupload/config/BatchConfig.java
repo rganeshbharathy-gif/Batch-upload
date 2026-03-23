@@ -1,11 +1,14 @@
 package com.example.batchupload.config;
 
+import com.example.batchupload.listener.PodProcessingListener;
 import com.example.batchupload.model.DimensionRecord;
 import com.example.batchupload.model.FileRange;
 import com.example.batchupload.processor.DimensionItemProcessor;
 import com.example.batchupload.reader.ByteRangeFlatFileItemReader;
 import com.example.batchupload.service.S3FileService;
+import org.springframework.batch.core.step.listener.StepExecutionListener;
 import org.springframework.batch.infrastructure.item.ItemReader;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.job.Job;
@@ -86,13 +89,15 @@ public class BatchConfig {
                          ItemReader<DimensionRecord> itemReader,
                          DimensionItemProcessor itemProcessor,
                          JdbcBatchItemWriter<DimensionRecord> itemWriter,
-                         AsyncTaskExecutor batchTaskExecutor) {
+                         AsyncTaskExecutor batchTaskExecutor,
+                         StepExecutionListener podProcessingListener) {
         return new StepBuilder("loadStep", jobRepository)
                 .<DimensionRecord, DimensionRecord>chunk(CHUNK_SIZE)
                 .transactionManager(transactionManager)
                 .reader(itemReader)
                 .processor(itemProcessor)
                 .writer(itemWriter)
+                .listener(podProcessingListener)
                 .taskExecutor(batchTaskExecutor)
                 .build();
     }
@@ -113,6 +118,25 @@ public class BatchConfig {
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
         return new ByteRangeFlatFileItemReader(s3FileService, podRange, bucket, s3Key);
+    }
+
+    // ── Listener: logs pod processing metadata to DB ───────────────────────────
+
+    @Bean
+    @StepScope
+    public PodProcessingListener podProcessingListener(
+            DataSource dataSource,
+            S3FileService s3FileService,
+            @Value("#{jobParameters['s3.bucket']}") String bucket,
+            @Value("#{jobParameters['s3.key']}") String s3Key) {
+        long fileSize = s3FileService.getFileSize(bucket, s3Key);
+        FileRange podRange = FileRange.forPod(fileSize, POD_INDEX, TOTAL_PODS);
+
+        return new PodProcessingListener(
+                new JdbcTemplate(dataSource),
+                POD_INDEX, TOTAL_PODS,
+                bucket, s3Key,
+                podRange.startByte(), podRange.endByte());
     }
 
     // ── Writer: JdbcBatchItemWriter ───────────────────────────────────────────

@@ -23,6 +23,29 @@ CREATE INDEX idx_dim_country_sector
     ON dimensions (country_code, sector_code);
 
 -- -----------------------------------------------------------------------------
+-- 1b. POD_PROCESSING_LOG — tracks which pod processed which byte range / rows
+-- -----------------------------------------------------------------------------
+CREATE TABLE pod_processing_log (
+    id               NUMBER          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    job_execution_id NUMBER(19,0)    NOT NULL,
+    pod_index        NUMBER(5,0)     NOT NULL,
+    total_pods       NUMBER(5,0)     NOT NULL,
+    s3_bucket        VARCHAR2(255),
+    s3_key           VARCHAR2(1024),
+    start_byte       NUMBER(19,0)    NOT NULL,
+    end_byte         NUMBER(19,0)    NOT NULL,
+    read_count       NUMBER(19,0)    DEFAULT 0,
+    write_count      NUMBER(19,0)    DEFAULT 0,
+    skip_count       NUMBER(19,0)    DEFAULT 0,
+    status           VARCHAR2(20)    NOT NULL,
+    started_at       TIMESTAMP,
+    finished_at      TIMESTAMP       DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_pod_log_job ON pod_processing_log (job_execution_id);
+CREATE INDEX idx_pod_log_pod ON pod_processing_log (pod_index, job_execution_id);
+
+-- -----------------------------------------------------------------------------
 -- 2. Spring Batch metadata tables (Oracle dialect)
 --    Only needed if spring.batch.jdbc.initialize-schema=never (production default).
 --    Source: spring-batch-core JAR → org/springframework/batch/core/schema-oracle10g.sql
