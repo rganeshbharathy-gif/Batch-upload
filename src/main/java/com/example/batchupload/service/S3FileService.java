@@ -1,5 +1,6 @@
 package com.example.batchupload.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -15,13 +16,11 @@ import java.io.InputStream;
 @Service
 public class S3FileService {
 
-    private static final String REGION = "us-east-1";
-
     private final S3Client s3Client;
 
-    public S3FileService() {
+    public S3FileService(@Value("${aws.s3.region}") String region) {
         this.s3Client = S3Client.builder()
-                .region(Region.of(REGION))
+                .region(Region.of(region))
                 .build();
     }
 

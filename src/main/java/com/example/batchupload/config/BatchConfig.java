@@ -66,17 +66,23 @@ public class BatchConfig {
     private static final String INSERT_SQL =
             "INSERT INTO dimensions (grid_id, person_id, country_code, sector_code) VALUES (?, ?, ?, ?)";
 
-    private static final int POD_INDEX = 0;
-    private static final int TOTAL_PODS = 1;
+    @Value("${batch.pod.index}")
+    private int podIndex;
 
-    private static final int CHUNK_SIZE = 5000;
-    private static final int THREAD_POOL_SIZE = 4;
+    @Value("${batch.pod.total}")
+    private int totalPods;
+
+    @Value("${batch.chunk-size}")
+    private int chunkSize;
+
+    @Value("${batch.thread-pool-size}")
+    private int threadPoolSize;
 
     // ── Job ───────────────────────────────────────────────────────────────────
 
     @Bean
     public Job dimensionLoadJob(JobRepository jobRepository, Step loadStep) {
-        return new JobBuilder("dimensionLoadJob-pod" + POD_INDEX, jobRepository)
+        return new JobBuilder("dimensionLoadJob-pod" + podIndex, jobRepository)
                 .start(loadStep)
                 .build();
     }
@@ -92,7 +98,7 @@ public class BatchConfig {
                          AsyncTaskExecutor batchTaskExecutor,
                          StepExecutionListener podProcessingListener) {
         return new StepBuilder("loadStep", jobRepository)
-                .<DimensionRecord, DimensionRecord>chunk(CHUNK_SIZE)
+                .<DimensionRecord, DimensionRecord>chunk(chunkSize)
                 .transactionManager(transactionManager)
                 .reader(itemReader)
                 .processor(itemProcessor)
@@ -111,10 +117,10 @@ public class BatchConfig {
             @Value("#{jobParameters['s3.bucket']}") String bucket,
             @Value("#{jobParameters['s3.key']}") String s3Key) {
         long fileSize = s3FileService.getFileSize(bucket, s3Key);
-        FileRange podRange = FileRange.forPod(fileSize, POD_INDEX, TOTAL_PODS);
+        FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
 
         log.info("Pod {}/{} — bucket={} key={} fileSize={} bytes, range=[{}, {}), isLast={}",
-                POD_INDEX, TOTAL_PODS, bucket, s3Key, fileSize,
+                podIndex, totalPods, bucket, s3Key, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
         return new ByteRangeFlatFileItemReader(s3FileService, podRange, bucket, s3Key);
@@ -130,11 +136,11 @@ public class BatchConfig {
             @Value("#{jobParameters['s3.bucket']}") String bucket,
             @Value("#{jobParameters['s3.key']}") String s3Key) {
         long fileSize = s3FileService.getFileSize(bucket, s3Key);
-        FileRange podRange = FileRange.forPod(fileSize, POD_INDEX, TOTAL_PODS);
+        FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
 
         return new PodProcessingListener(
                 new JdbcTemplate(dataSource),
-                POD_INDEX, TOTAL_PODS,
+                podIndex, totalPods,
                 bucket, s3Key,
                 podRange.startByte(), podRange.endByte());
     }
@@ -167,8 +173,8 @@ public class BatchConfig {
     @Bean
     public AsyncTaskExecutor batchTaskExecutor() {
         ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
-        taskExecutor.setCorePoolSize(THREAD_POOL_SIZE);
-        taskExecutor.setMaxPoolSize(THREAD_POOL_SIZE);
+        taskExecutor.setCorePoolSize(threadPoolSize);
+        taskExecutor.setMaxPoolSize(threadPoolSize);
         taskExecutor.setThreadNamePrefix("batch-writer-");
         taskExecutor.setWaitForTasksToCompleteOnShutdown(true);
         taskExecutor.setAwaitTerminationSeconds(600);
