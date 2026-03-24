@@ -173,10 +173,12 @@ public class BatchConfig {
     }
 
     /**
-     * JPA transaction manager used by {@code @Transactional("jpaTransactionManager")}
-     * in services that rely on JPA repositories.
+     * JPA transaction manager — marked {@code @Primary} so it is the default
+     * for {@code @Transactional} across the application.
+     * The Batch step receives its {@code JdbcTransactionManager} explicitly via method injection.
      */
     @Bean
+    @org.springframework.context.annotation.Primary
     public org.springframework.orm.jpa.JpaTransactionManager jpaTransactionManager(EntityManagerFactory emf) {
         return new org.springframework.orm.jpa.JpaTransactionManager(emf);
     }

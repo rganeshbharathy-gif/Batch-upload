@@ -12,7 +12,7 @@ import java.util.List;
  * Used by the scheduler to claim new S3 files and update their status after job completion.
  */
 @Service
-@Transactional(transactionManager = "jpaTransactionManager")
+@Transactional
 public class FileProcessingService {
 
     private final FileProcessingLogRepository fileProcessingLogRepository;
