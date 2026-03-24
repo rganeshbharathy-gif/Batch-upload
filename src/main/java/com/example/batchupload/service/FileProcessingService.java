@@ -1,7 +1,8 @@
-package com.example.batchupload.repository;
+package com.example.batchupload.service;
 
 import com.example.batchupload.model.FileProcessingLog;
-import org.springframework.stereotype.Repository;
+import com.example.batchupload.repository.FileProcessingLogRepository;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -10,12 +11,12 @@ import java.util.List;
  * Manages rows in {@code FILE_PROCESSING_LOG}.
  * Used by the scheduler to claim new S3 files and update their status after job completion.
  */
-@Repository
-public class FileProcessingRepository {
+@Service
+public class FileProcessingService {
 
     private final FileProcessingLogRepository fileProcessingLogRepository;
 
-    public FileProcessingRepository(FileProcessingLogRepository fileProcessingLogRepository) {
+    public FileProcessingService(FileProcessingLogRepository fileProcessingLogRepository) {
         this.fileProcessingLogRepository = fileProcessingLogRepository;
     }
 
