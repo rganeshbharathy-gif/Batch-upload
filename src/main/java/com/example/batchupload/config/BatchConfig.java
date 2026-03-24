@@ -26,6 +26,7 @@ import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import jakarta.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 
 /**
@@ -161,11 +162,23 @@ public class BatchConfig {
                 .build();
     }
 
-    // ── Transaction Manager ──────────────────────────────────────────────────
+    // ── Transaction Managers ─────────────────────────────────────────────────
 
+    /**
+     * JDBC transaction manager used by Spring Batch steps.
+     */
     @Bean
     public JdbcTransactionManager transactionManager(DataSource dataSource) {
         return new JdbcTransactionManager(dataSource);
+    }
+
+    /**
+     * JPA transaction manager used by {@code @Transactional("jpaTransactionManager")}
+     * in services that rely on JPA repositories.
+     */
+    @Bean
+    public org.springframework.orm.jpa.JpaTransactionManager jpaTransactionManager(EntityManagerFactory emf) {
+        return new org.springframework.orm.jpa.JpaTransactionManager(emf);
     }
 
     // ── TaskExecutor for multi-threaded step ──────────────────────────────────

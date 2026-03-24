@@ -12,6 +12,7 @@ import java.util.List;
  * Used by the scheduler to claim new S3 files and update their status after job completion.
  */
 @Service
+@Transactional(transactionManager = "jpaTransactionManager")
 public class FileProcessingService {
 
     private final FileProcessingLogRepository fileProcessingLogRepository;
@@ -33,7 +34,6 @@ public class FileProcessingService {
      * If the unique constraint fires (another pod claimed it first), the caller
      * should catch the exception and skip the file.
      */
-    @Transactional
     public long claim(String bucket, String s3Key, String fileName, long fileSize, String podName) {
         var log = new FileProcessingLog(fileName, bucket, s3Key, fileSize, podName);
         return fileProcessingLogRepository.save(log).getId();
@@ -42,7 +42,6 @@ public class FileProcessingService {
     /**
      * Marks the file as COMPLETED and records the job execution ID and row count.
      */
-    @Transactional
     public void markCompleted(long id, long jobExecutionId, long rowCount) {
         var log = fileProcessingLogRepository.findById(id).orElseThrow(
                 () -> new IllegalStateException("FileProcessingLog not found: " + id));
@@ -53,7 +52,6 @@ public class FileProcessingService {
     /**
      * Marks the file as FAILED with an error message.
      */
-    @Transactional
     public void markFailed(long id, String errorMessage) {
         var log = fileProcessingLogRepository.findById(id).orElseThrow(
                 () -> new IllegalStateException("FileProcessingLog not found: " + id));
