@@ -1,10 +1,10 @@
 package com.example.batchupload.repository;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.example.batchupload.model.FileProcessingLog;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.Timestamp;
-import java.time.Instant;
+import java.util.List;
 
 /**
  * Manages rows in {@code FILE_PROCESSING_LOG}.
@@ -13,20 +13,18 @@ import java.time.Instant;
 @Repository
 public class FileProcessingRepository {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final FileProcessingLogRepository fileProcessingLogRepository;
 
-    public FileProcessingRepository(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public FileProcessingRepository(FileProcessingLogRepository fileProcessingLogRepository) {
+        this.fileProcessingLogRepository = fileProcessingLogRepository;
     }
 
     /**
      * Returns {@code true} if the file has already been claimed (PROCESSING or COMPLETED).
      */
     public boolean isAlreadyClaimed(String bucket, String s3Key) {
-        String sql = "SELECT COUNT(*) FROM FILE_PROCESSING_LOG "
-                + "WHERE S3_BUCKET = ? AND S3_KEY = ? AND STATUS IN ('PROCESSING', 'COMPLETED')";
-        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, bucket, s3Key);
-        return count != null && count > 0;
+        return fileProcessingLogRepository.existsByS3BucketAndS3KeyAndStatusIn(
+                bucket, s3Key, List.of("PROCESSING", "COMPLETED"));
     }
 
     /**
@@ -34,37 +32,31 @@ public class FileProcessingRepository {
      * If the unique constraint fires (another pod claimed it first), the caller
      * should catch the exception and skip the file.
      */
+    @Transactional
     public long claim(String bucket, String s3Key, String fileName, long fileSize, String podName) {
-        String sql = "INSERT INTO FILE_PROCESSING_LOG "
-                + "(FILE_NAME, S3_BUCKET, S3_KEY, FILE_SIZE, STATUS, PICKED_BY_POD, STARTED_AT) "
-                + "VALUES (?, ?, ?, ?, 'PROCESSING', ?, ?)";
-        jdbcTemplate.update(sql, fileName, bucket, s3Key, fileSize, podName,
-                Timestamp.from(Instant.now()));
-
-        return jdbcTemplate.queryForObject(
-                "SELECT ID FROM FILE_PROCESSING_LOG WHERE S3_BUCKET = ? AND S3_KEY = ?",
-                Long.class, bucket, s3Key);
+        var log = new FileProcessingLog(fileName, bucket, s3Key, fileSize, podName);
+        return fileProcessingLogRepository.save(log).getId();
     }
 
     /**
      * Marks the file as COMPLETED and records the job execution ID and row count.
      */
+    @Transactional
     public void markCompleted(long id, long jobExecutionId, long rowCount) {
-        String sql = "UPDATE FILE_PROCESSING_LOG "
-                + "SET STATUS = 'COMPLETED', JOB_EXECUTION_ID = ?, ROW_COUNT = ?, FINISHED_AT = ? "
-                + "WHERE ID = ?";
-        jdbcTemplate.update(sql, jobExecutionId, rowCount, Timestamp.from(Instant.now()), id);
+        var log = fileProcessingLogRepository.findById(id).orElseThrow(
+                () -> new IllegalStateException("FileProcessingLog not found: " + id));
+        log.markCompleted(jobExecutionId, rowCount);
+        fileProcessingLogRepository.save(log);
     }
 
     /**
      * Marks the file as FAILED with an error message.
      */
+    @Transactional
     public void markFailed(long id, String errorMessage) {
-        String sql = "UPDATE FILE_PROCESSING_LOG "
-                + "SET STATUS = 'FAILED', ERROR_MESSAGE = ?, FINISHED_AT = ? "
-                + "WHERE ID = ?";
-        String truncated = errorMessage != null && errorMessage.length() > 4000
-                ? errorMessage.substring(0, 4000) : errorMessage;
-        jdbcTemplate.update(sql, truncated, Timestamp.from(Instant.now()), id);
+        var log = fileProcessingLogRepository.findById(id).orElseThrow(
+                () -> new IllegalStateException("FileProcessingLog not found: " + id));
+        log.markFailed(errorMessage);
+        fileProcessingLogRepository.save(log);
     }
 }
