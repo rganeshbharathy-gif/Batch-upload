@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -41,6 +42,8 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private final FileRange range;
     private final String bucket;
     private final String s3Key;
+    private final int podIndex;
+    private final Path localFilePath;
 
     private InputStream s3InputStream;
     private BufferedReader reader;
@@ -54,19 +57,42 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private int countryCodeIndex;
     private int sectorCodeIndex;
 
+    /** S3-based constructor — resolves column indices from the file header. */
     public ByteRangeFlatFileItemReader(S3FileService s3FileService, FileRange range,
-                                       String bucket, String s3Key) {
+                                       String bucket, String s3Key, int podIndex) {
         this.s3FileService = s3FileService;
         this.range = range;
         this.bucket = bucket;
         this.s3Key = s3Key;
+        this.podIndex = podIndex;
+        this.localFilePath = null;
+        setName(ByteRangeFlatFileItemReader.class.getSimpleName());
+    }
+
+    /** Local-file constructor for testing — column indices are provided directly. */
+    public ByteRangeFlatFileItemReader(Path localFilePath, FileRange range,
+                                       int gridIdIndex, int personIdIndex,
+                                       int countryCodeIndex, int sectorCodeIndex) {
+        this.s3FileService = null;
+        this.range = range;
+        this.bucket = null;
+        this.s3Key = null;
+        this.podIndex = 0;
+        this.localFilePath = localFilePath;
+        this.gridIdIndex = gridIdIndex;
+        this.personIdIndex = personIdIndex;
+        this.countryCodeIndex = countryCodeIndex;
+        this.sectorCodeIndex = sectorCodeIndex;
         setName(ByteRangeFlatFileItemReader.class.getSimpleName());
     }
 
     @Override
     public void open(ExecutionContext executionContext) throws ItemStreamException {
         try {
-            if (range.startByte() == 0) {
+            if (localFilePath != null) {
+                // Local file mode (testing) — column indices already set via constructor
+                openLocalFile();
+            } else if (range.startByte() == 0) {
                 // Pod 0: read from the beginning so we can parse metadata + header
                 s3InputStream = s3FileService.getInputStream(bucket, s3Key, 0, range.endByte());
                 reader = new BufferedReader(
@@ -92,7 +118,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
                 }
             }
 
-            log.info("Opened S3 reader — startByte={} endByte={} isLast={} columns=[GRID_ID={}, PERSON_ID={}, COUNTRY_CODE={}, SECTOR_CODE={}]",
+            log.info("Opened reader — startByte={} endByte={} isLast={} columns=[GRID_ID={}, PERSON_ID={}, COUNTRY_CODE={}, SECTOR_CODE={}]",
                     range.startByte(), range.endByte(), range.isLast(),
                     gridIdIndex, personIdIndex, countryCodeIndex, sectorCodeIndex);
 
@@ -120,6 +146,30 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         byteCursor += header.length() + 1;
 
         resolveColumnIndices(header);
+    }
+
+    /**
+     * Opens a local file for testing — skips partial first line for non-zero ranges.
+     * Column indices are already set via constructor, so no header parsing is needed.
+     */
+    private void openLocalFile() throws IOException {
+        s3InputStream = java.nio.file.Files.newInputStream(localFilePath);
+        // Skip to startByte
+        long skipped = s3InputStream.skip(range.startByte());
+        if (skipped != range.startByte()) {
+            throw new IOException("Could not skip to byte " + range.startByte());
+        }
+        reader = new BufferedReader(
+                new InputStreamReader(s3InputStream, StandardCharsets.UTF_8), BUFFER_SIZE);
+        byteCursor = range.startByte();
+
+        if (range.startByte() > 0) {
+            // Skip the partial line that "belongs" to the previous pod
+            String partial = reader.readLine();
+            if (partial != null) {
+                byteCursor += partial.length() + 1;
+            }
+        }
     }
 
     /**
@@ -227,7 +277,8 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
                 trim(fields[gridIdIndex]),
                 trim(fields[personIdIndex]),
                 trim(fields[countryCodeIndex]),
-                trim(fields[sectorCodeIndex]));
+                trim(fields[sectorCodeIndex]),
+                podIndex);
     }
 
     private static String trim(String value) {

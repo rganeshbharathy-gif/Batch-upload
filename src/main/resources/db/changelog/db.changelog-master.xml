@@ -8,5 +8,6 @@
     <include file="db/changelog/001-create-file-processing-log.sql"/>
     <include file="db/changelog/002-create-pod-processing-log.sql"/>
     <include file="db/changelog/003-create-dimensions.sql"/>
+    <include file="db/changelog/004-add-pod-index-to-dimensions.sql"/>
 
 </databaseChangeLog>

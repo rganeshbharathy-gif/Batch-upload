@@ -65,7 +65,7 @@ public class BatchConfig {
     private static final Logger log = LoggerFactory.getLogger(BatchConfig.class);
 
     private static final String INSERT_SQL =
-            "INSERT INTO dimensions (grid_id, person_id, country_code, sector_code) VALUES (?, ?, ?, ?)";
+            "INSERT INTO dimensions (grid_id, person_id, country_code, sector_code, pod_index) VALUES (?, ?, ?, ?, ?)";
 
     @Value("${batch.pod.index}")
     private int podIndex;
@@ -124,7 +124,7 @@ public class BatchConfig {
                 podIndex, totalPods, bucket, s3Key, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
-        return new ByteRangeFlatFileItemReader(s3FileService, podRange, bucket, s3Key);
+        return new ByteRangeFlatFileItemReader(s3FileService, podRange, bucket, s3Key, podIndex);
     }
 
     // ── Listener: logs pod processing metadata to DB ───────────────────────────
@@ -158,6 +158,7 @@ public class BatchConfig {
                     ps.setString(2, item.personId());
                     ps.setString(3, item.countryCode());
                     ps.setString(4, item.sectorCode());
+                    ps.setInt(5, item.podIndex());
                 })
                 .build();
     }

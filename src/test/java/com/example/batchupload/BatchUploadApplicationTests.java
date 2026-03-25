@@ -57,7 +57,7 @@ class BatchUploadApplicationTests {
         assertThat(allRecords).hasSize(12);
         for (int i = 0; i < 12; i++) {
             int finalI = i;
-            assertThat(allRecords).anyMatch(r -> r.csiId().equals("csi" + finalI));
+            assertThat(allRecords).anyMatch(r -> r.gridId().equals("csi" + finalI));
         }
     }
 
