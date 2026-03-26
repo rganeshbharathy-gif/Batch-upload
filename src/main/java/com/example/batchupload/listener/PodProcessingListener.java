@@ -1,27 +1,25 @@
 package com.example.batchupload.listener;
 
+import com.example.batchupload.model.PodProcessingLog;
+import com.example.batchupload.repository.PodProcessingLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.core.step.listener.StepExecutionListener;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Records pod processing metadata into {@code POD_PROCESSING_LOG} after each step completes.
  * Captures which pod processed which byte range, how many rows were read/written, and the status.
+ *
+ * <p>For the last pod, also stores the expected row count extracted from the file footer
+ * so it can be compared against actual rows written across all pods.
  */
 public class PodProcessingListener implements StepExecutionListener {
 
     private static final Logger log = LoggerFactory.getLogger(PodProcessingListener.class);
+    private static final String EXPECTED_ROW_COUNT_KEY = "footer.expectedRowCount";
 
-    private static final String INSERT_SQL =
-            "INSERT INTO pod_processing_log "
-            + "(job_execution_id, pod_index, total_pods, s3_bucket, s3_key, "
-            + " start_byte, end_byte, read_count, write_count, skip_count, "
-            + " status, started_at, finished_at) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
-    private final JdbcTemplate jdbcTemplate;
+    private final PodProcessingLogRepository podProcessingLogRepository;
     private final int podIndex;
     private final int totalPods;
     private final String bucket;
@@ -29,11 +27,11 @@ public class PodProcessingListener implements StepExecutionListener {
     private final long startByte;
     private final long endByte;
 
-    public PodProcessingListener(JdbcTemplate jdbcTemplate,
+    public PodProcessingListener(PodProcessingLogRepository podProcessingLogRepository,
                                  int podIndex, int totalPods,
                                  String bucket, String s3Key,
                                  long startByte, long endByte) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.podProcessingLogRepository = podProcessingLogRepository;
         this.podIndex = podIndex;
         this.totalPods = totalPods;
         this.bucket = bucket;
@@ -51,7 +49,13 @@ public class PodProcessingListener implements StepExecutionListener {
                 + stepExecution.getProcessSkipCount();
         String status = stepExecution.getStatus().name();
 
-        jdbcTemplate.update(INSERT_SQL,
+        // Read expected row count from execution context (set by last pod's reader)
+        Long expectedRowCount = null;
+        if (stepExecution.getExecutionContext().containsKey(EXPECTED_ROW_COUNT_KEY)) {
+            expectedRowCount = stepExecution.getExecutionContext().getLong(EXPECTED_ROW_COUNT_KEY);
+        }
+
+        PodProcessingLog podLog = new PodProcessingLog(
                 stepExecution.getJobExecutionId(),
                 podIndex,
                 totalPods,
@@ -63,10 +67,13 @@ public class PodProcessingListener implements StepExecutionListener {
                 writeCount,
                 skipCount,
                 status,
-                java.sql.Timestamp.valueOf(stepExecution.getStartTime()),
-                java.sql.Timestamp.valueOf(stepExecution.getEndTime()));
+                expectedRowCount,
+                stepExecution.getStartTime().toInstant(),
+                stepExecution.getEndTime().toInstant());
 
-        log.info("Pod {}/{} — wrote processing log: read={} written={} skipped={} status={} range=[{}, {})",
-                podIndex, totalPods, readCount, writeCount, skipCount, status, startByte, endByte);
+        podProcessingLogRepository.save(podLog);
+
+        log.info("Pod {}/{} — wrote processing log: read={} written={} skipped={} status={} range=[{}, {}) expectedRowCount={}",
+                podIndex, totalPods, readCount, writeCount, skipCount, status, startByte, endByte, expectedRowCount);
     }
 }

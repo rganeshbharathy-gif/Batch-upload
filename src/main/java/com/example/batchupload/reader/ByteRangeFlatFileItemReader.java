@@ -50,6 +50,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private long byteCursor;
     private long linesRead;
     private long linesSkipped;
+    private long expectedRowCount = -1;  // extracted from footer by last pod
 
     // Column indices resolved from the header row
     private int gridIdIndex;
@@ -216,6 +217,9 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     public void update(ExecutionContext executionContext) {
         executionContext.putLong("byteCursor", byteCursor);
         executionContext.putLong("linesRead", linesRead);
+        if (expectedRowCount >= 0) {
+            executionContext.putLong("footer.expectedRowCount", expectedRowCount);
+        }
     }
 
     @Override
@@ -245,6 +249,18 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
             byteCursor += line.length() + 1;
 
+            // Last pod: check if this line is the footer (last line before EOF)
+            if (range.isLast()) {
+                reader.mark(BUFFER_SIZE);
+                String nextLine = reader.readLine();
+                if (nextLine == null) {
+                    // This line is the footer — extract expected row count from index 1
+                    parseFooter(line);
+                    return null;
+                }
+                reader.reset();
+            }
+
             if (line.isBlank()) {
                 linesSkipped++;
                 continue;
@@ -258,6 +274,24 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
             linesRead++;
             return record;
+        }
+    }
+
+    /**
+     * Parses the footer line to extract the expected row count.
+     * Footer format: {@code FOOTER|12345|...} — index 1 (2nd field) is the row count.
+     */
+    private void parseFooter(String footerLine) {
+        try {
+            String[] fields = footerLine.split("\\|", -1);
+            if (fields.length >= 2) {
+                expectedRowCount = Long.parseLong(fields[1].trim());
+                log.info("Footer detected — expected row count: {}", expectedRowCount);
+            } else {
+                log.warn("Footer line has fewer than 2 fields: [{}]", truncate(footerLine, 120));
+            }
+        } catch (NumberFormatException e) {
+            log.warn("Could not parse row count from footer: [{}]", truncate(footerLine, 120));
         }
     }
 

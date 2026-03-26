@@ -5,10 +5,10 @@ import com.example.batchupload.model.DimensionRecord;
 import com.example.batchupload.model.FileRange;
 import com.example.batchupload.processor.DimensionItemProcessor;
 import com.example.batchupload.reader.ByteRangeFlatFileItemReader;
+import com.example.batchupload.repository.PodProcessingLogRepository;
 import com.example.batchupload.service.S3FileService;
 import org.springframework.batch.core.step.listener.StepExecutionListener;
 import org.springframework.batch.infrastructure.item.ItemReader;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.job.Job;
@@ -132,7 +132,7 @@ public class BatchConfig {
     @Bean
     @StepScope
     public PodProcessingListener podProcessingListener(
-            DataSource dataSource,
+            PodProcessingLogRepository podProcessingLogRepository,
             S3FileService s3FileService,
             @Value("#{jobParameters['s3.bucket']}") String bucket,
             @Value("#{jobParameters['s3.key']}") String s3Key) {
@@ -140,7 +140,7 @@ public class BatchConfig {
         FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
 
         return new PodProcessingListener(
-                new JdbcTemplate(dataSource),
+                podProcessingLogRepository,
                 podIndex, totalPods,
                 bucket, s3Key,
                 podRange.startByte(), podRange.endByte());

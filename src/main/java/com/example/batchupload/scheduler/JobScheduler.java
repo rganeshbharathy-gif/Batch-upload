@@ -1,5 +1,6 @@
 package com.example.batchupload.scheduler;
 
+import com.example.batchupload.repository.PodProcessingLogRepository;
 import com.example.batchupload.service.FileProcessingService;
 import com.example.batchupload.service.S3FileService;
 import org.slf4j.Logger;
@@ -22,6 +23,7 @@ public class JobScheduler {
     private final Job dimensionLoadJob;
     private final FileProcessingService fileProcessingService;
     private final S3FileService s3FileService;
+    private final PodProcessingLogRepository podProcessingLogRepository;
 
     @Value("${batch.pod.index}")
     private int podIndex;
@@ -38,11 +40,13 @@ public class JobScheduler {
     public JobScheduler(JobLauncher jobLauncher,
                         Job dimensionLoadJob,
                         FileProcessingService fileProcessingService,
-                        S3FileService s3FileService) {
+                        S3FileService s3FileService,
+                        PodProcessingLogRepository podProcessingLogRepository) {
         this.jobLauncher = jobLauncher;
         this.dimensionLoadJob = dimensionLoadJob;
         this.fileProcessingService = fileProcessingService;
         this.s3FileService = s3FileService;
+        this.podProcessingLogRepository = podProcessingLogRepository;
     }
 
     @Scheduled(cron = "${batch.schedule.cron:0 0 2 * * *}")
@@ -87,9 +91,27 @@ public class JobScheduler {
                     .sum();
             fileProcessingService.markCompleted(fileLogId, execution.getId(), rowCount);
 
+            // 5. Validate row count against footer (last pod stores expected count)
+            validateRowCount(execution.getId(), rowCount);
+
         } catch (Exception e) {
             log.error("Scheduled job execution failed", e);
             fileProcessingService.markFailed(fileLogId, e.getMessage());
+        }
+    }
+
+    private void validateRowCount(long jobExecutionId, long actualRowCount) {
+        Long expectedRowCount = podProcessingLogRepository.findExpectedRowCountByJobExecutionId(jobExecutionId);
+        if (expectedRowCount == null) {
+            log.warn("No expected row count found in footer — skipping validation");
+            return;
+        }
+
+        if (actualRowCount == expectedRowCount) {
+            log.info("Row count validation PASSED — expected={} actual={}", expectedRowCount, actualRowCount);
+        } else {
+            log.error("Row count validation FAILED — expected={} actual={} difference={}",
+                    expectedRowCount, actualRowCount, expectedRowCount - actualRowCount);
         }
     }
 }
