@@ -40,12 +40,13 @@ public class FileProcessingService {
     }
 
     /**
-     * Marks the file as COMPLETED and records the job execution ID and row count.
+     * Marks the file as COMPLETED and records the job execution ID, actual row count,
+     * and expected row count (from file footer).
      */
-    public void markCompleted(long id, long jobExecutionId, long rowCount) {
+    public void markCompleted(long id, long jobExecutionId, long rowCount, Long expectedRowCount) {
         var log = fileProcessingLogRepository.findById(id).orElseThrow(
                 () -> new IllegalStateException("FileProcessingLog not found: " + id));
-        log.markCompleted(jobExecutionId, rowCount);
+        log.markCompleted(jobExecutionId, rowCount, expectedRowCount);
         fileProcessingLogRepository.save(log);
     }
 

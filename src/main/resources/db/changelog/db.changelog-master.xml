@@ -10,5 +10,6 @@
     <include file="db/changelog/003-create-dimensions.sql"/>
     <include file="db/changelog/004-add-pod-index-to-dimensions.sql"/>
     <include file="db/changelog/005-add-expected-row-count-to-pod-log.sql"/>
+    <include file="db/changelog/006-add-expected-row-count-to-file-log.sql"/>
 
 </databaseChangeLog>

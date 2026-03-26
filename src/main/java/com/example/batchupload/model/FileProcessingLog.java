@@ -42,6 +42,9 @@ public class FileProcessingLog {
     @Column(name = "ROW_COUNT")
     private Long rowCount;
 
+    @Column(name = "EXPECTED_ROW_COUNT")
+    private Long expectedRowCount;
+
     @Column(name = "ERROR_MESSAGE", length = 4000)
     private String errorMessage;
 
@@ -83,16 +86,19 @@ public class FileProcessingLog {
 
     public Long getRowCount() { return rowCount; }
 
+    public Long getExpectedRowCount() { return expectedRowCount; }
+
     public String getErrorMessage() { return errorMessage; }
 
     public Instant getStartedAt() { return startedAt; }
 
     public Instant getFinishedAt() { return finishedAt; }
 
-    public void markCompleted(long jobExecutionId, long rowCount) {
+    public void markCompleted(long jobExecutionId, long rowCount, Long expectedRowCount) {
         this.status = "COMPLETED";
         this.jobExecutionId = jobExecutionId;
         this.rowCount = rowCount;
+        this.expectedRowCount = expectedRowCount;
         this.finishedAt = Instant.now();
     }
 

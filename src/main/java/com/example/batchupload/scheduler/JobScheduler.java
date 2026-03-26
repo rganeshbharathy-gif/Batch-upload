@@ -85,14 +85,17 @@ public class JobScheduler {
             var execution = jobLauncher.run(dimensionLoadJob, params);
             log.info("Job finished with status: {}", execution.getStatus());
 
-            // 4. Mark completed
+            // 4. Get expected row count from footer (stored by last pod)
+            Long expectedRowCount = podProcessingLogRepository.findExpectedRowCountByJobExecutionId(execution.getId());
+
+            // 5. Mark completed with actual and expected row counts
             long rowCount = execution.getStepExecutions().stream()
                     .mapToLong(step -> step.getWriteCount())
                     .sum();
-            fileProcessingService.markCompleted(fileLogId, execution.getId(), rowCount);
+            fileProcessingService.markCompleted(fileLogId, execution.getId(), rowCount, expectedRowCount);
 
-            // 5. Validate row count against footer (last pod stores expected count)
-            validateRowCount(execution.getId(), rowCount);
+            // 6. Validate row count against footer
+            validateRowCount(expectedRowCount, rowCount);
 
         } catch (Exception e) {
             log.error("Scheduled job execution failed", e);
@@ -100,8 +103,7 @@ public class JobScheduler {
         }
     }
 
-    private void validateRowCount(long jobExecutionId, long actualRowCount) {
-        Long expectedRowCount = podProcessingLogRepository.findExpectedRowCountByJobExecutionId(jobExecutionId);
+    private void validateRowCount(Long expectedRowCount, long actualRowCount) {
         if (expectedRowCount == null) {
             log.warn("No expected row count found in footer — skipping validation");
             return;
