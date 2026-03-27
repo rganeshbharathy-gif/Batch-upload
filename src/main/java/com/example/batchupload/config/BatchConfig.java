@@ -64,8 +64,19 @@ public class BatchConfig {
 
     private static final Logger log = LoggerFactory.getLogger(BatchConfig.class);
 
-    private static final String INSERT_SQL =
-            "INSERT INTO dimensions (grid_id, person_id, country_code, sector_code, pod_index) VALUES (?, ?, ?, ?, ?)";
+    private static final String MERGE_SQL =
+            "MERGE INTO dimensions d " +
+            "USING (SELECT ? AS grid_id, ? AS person_id, ? AS country_code, ? AS sector_code, ? AS pod_index " +
+            "       FROM DUAL) s " +
+            "ON (d.grid_id = s.grid_id AND d.person_id = s.person_id) " +
+            "WHEN MATCHED THEN " +
+            "    UPDATE SET d.country_code = s.country_code, " +
+            "               d.sector_code  = s.sector_code, " +
+            "               d.pod_index    = s.pod_index, " +
+            "               d.load_date    = TRUNC(SYSDATE) " +
+            "WHEN NOT MATCHED THEN " +
+            "    INSERT (grid_id, person_id, country_code, sector_code, pod_index, load_date) " +
+            "    VALUES (s.grid_id, s.person_id, s.country_code, s.sector_code, s.pod_index, TRUNC(SYSDATE))";
 
     @Value("${batch.pod.index}")
     private int podIndex;
@@ -152,7 +163,7 @@ public class BatchConfig {
     public JdbcBatchItemWriter<DimensionRecord> itemWriter(DataSource dataSource) {
         return new JdbcBatchItemWriterBuilder<DimensionRecord>()
                 .dataSource(dataSource)
-                .sql(INSERT_SQL)
+                .sql(MERGE_SQL)
                 .itemPreparedStatementSetter((item, ps) -> {
                     ps.setString(1, item.gridId());
                     ps.setString(2, item.personId());

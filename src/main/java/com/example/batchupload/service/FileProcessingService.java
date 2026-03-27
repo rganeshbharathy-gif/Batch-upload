@@ -51,6 +51,16 @@ public class FileProcessingService {
     }
 
     /**
+     * Removes COMPLETED or FAILED entries for the given file so the same S3 key
+     * can be claimed again on the next daily run. A PROCESSING entry (if present)
+     * is intentionally left intact to prevent duplicate concurrent runs.
+     */
+    public void releaseForReprocessing(String bucket, String s3Key) {
+        fileProcessingLogRepository
+                .deleteByS3BucketAndS3KeyAndStatusIn(bucket, s3Key, List.of("COMPLETED", "FAILED"));
+    }
+
+    /**
      * Marks the file as FAILED with an error message.
      */
     public void markFailed(long id, String errorMessage) {

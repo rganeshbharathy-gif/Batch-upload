@@ -1,6 +1,7 @@
 package com.example.batchupload.scheduler;
 
 import com.example.batchupload.repository.PodProcessingLogRepository;
+import com.example.batchupload.service.DimensionCleanupService;
 import com.example.batchupload.service.FileProcessingService;
 import com.example.batchupload.service.S3FileService;
 import org.slf4j.Logger;
@@ -24,6 +25,7 @@ public class JobScheduler {
     private final FileProcessingService fileProcessingService;
     private final S3FileService s3FileService;
     private final PodProcessingLogRepository podProcessingLogRepository;
+    private final DimensionCleanupService dimensionCleanupService;
 
     @Value("${batch.pod.index}")
     private int podIndex;
@@ -41,23 +43,29 @@ public class JobScheduler {
                         Job dimensionLoadJob,
                         FileProcessingService fileProcessingService,
                         S3FileService s3FileService,
-                        PodProcessingLogRepository podProcessingLogRepository) {
+                        PodProcessingLogRepository podProcessingLogRepository,
+                        DimensionCleanupService dimensionCleanupService) {
         this.jobLauncher = jobLauncher;
         this.dimensionLoadJob = dimensionLoadJob;
         this.fileProcessingService = fileProcessingService;
         this.s3FileService = s3FileService;
         this.podProcessingLogRepository = podProcessingLogRepository;
+        this.dimensionCleanupService = dimensionCleanupService;
     }
 
     @Scheduled(cron = "${batch.schedule.cron:0 0 2 * * *}")
     public void runDimensionLoadJob() {
-        // 1. Check if this file has already been claimed
+        // 1. Release any previous COMPLETED/FAILED entry so the same S3 key can be claimed again today
+        fileProcessingService.releaseForReprocessing(s3Bucket, s3Key);
+        log.info("Released previous file log entries for reprocessing: bucket={} key={}", s3Bucket, s3Key);
+
+        // 2. Check if this file is already claimed (PROCESSING by another pod — concurrent guard)
         if (fileProcessingService.isAlreadyClaimed(s3Bucket, s3Key)) {
             log.info("File already processed or in progress — skipping: bucket={} key={}", s3Bucket, s3Key);
             return;
         }
 
-        // 2. Claim the file
+        // 3. Claim the file
         long fileSize = s3FileService.getFileSize(s3Bucket, s3Key);
         String fileName = s3Key.substring(s3Key.lastIndexOf('/') + 1);
         String podName = "pod-" + podIndex;
@@ -70,7 +78,7 @@ public class JobScheduler {
             return;
         }
 
-        // 3. Launch the job
+        // 4. Launch the job
         try {
             var params = new JobParametersBuilder()
                     .addString("pod.index", String.valueOf(podIndex))
@@ -85,16 +93,19 @@ public class JobScheduler {
             var execution = jobLauncher.run(dimensionLoadJob, params);
             log.info("Job finished with status: {}", execution.getStatus());
 
-            // 4. Get expected row count from footer (stored by last pod)
+            // 5. Delete stale DIMENSIONS rows not touched by today's MERGE
+            dimensionCleanupService.deleteStaleRows();
+
+            // 6. Get expected row count from footer (stored by last pod)
             Long expectedRowCount = podProcessingLogRepository.findExpectedRowCountByJobExecutionId(execution.getId());
 
-            // 5. Mark completed with actual and expected row counts
+            // 7. Mark completed with actual and expected row counts
             long rowCount = execution.getStepExecutions().stream()
                     .mapToLong(step -> step.getWriteCount())
                     .sum();
             fileProcessingService.markCompleted(fileLogId, execution.getId(), rowCount, expectedRowCount);
 
-            // 6. Validate row count against footer
+            // 8. Validate row count against footer
             validateRowCount(expectedRowCount, rowCount);
 
         } catch (Exception e) {
