@@ -23,7 +23,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.AsyncTaskExecutor;
-import org.springframework.jdbc.support.JdbcTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -64,19 +64,20 @@ public class BatchConfig {
 
     private static final Logger log = LoggerFactory.getLogger(BatchConfig.class);
 
-    private static final String MERGE_SQL =
-            "MERGE INTO dimensions d " +
-            "USING (SELECT ? AS grid_id, ? AS person_id, ? AS country_code, ? AS sector_code, ? AS pod_index " +
-            "       FROM DUAL) s " +
-            "ON (d.grid_id = s.grid_id AND d.person_id = s.person_id) " +
-            "WHEN MATCHED THEN " +
-            "    UPDATE SET d.country_code = s.country_code, " +
-            "               d.sector_code  = s.sector_code, " +
-            "               d.pod_index    = s.pod_index, " +
-            "               d.load_date    = TRUNC(SYSDATE) " +
-            "WHEN NOT MATCHED THEN " +
-            "    INSERT (grid_id, person_id, country_code, sector_code, pod_index, load_date) " +
-            "    VALUES (s.grid_id, s.person_id, s.country_code, s.sector_code, s.pod_index, TRUNC(SYSDATE))";
+    private static final String MERGE_SQL = """
+            MERGE INTO dimensions d \
+            USING (SELECT ? AS grid_id, ? AS person_id, ? AS country_code, ? AS sector_code, ? AS pod_index \
+                   FROM DUAL) s \
+            ON (d.grid_id = s.grid_id AND d.person_id = s.person_id) \
+            WHEN MATCHED THEN \
+                UPDATE SET d.country_code = s.country_code, \
+                           d.sector_code  = s.sector_code, \
+                           d.pod_index    = s.pod_index, \
+                           d.load_date    = TRUNC(SYSDATE) \
+            WHEN NOT MATCHED THEN \
+                INSERT (grid_id, person_id, country_code, sector_code, pod_index, load_date) \
+                VALUES (s.grid_id, s.person_id, s.country_code, s.sector_code, s.pod_index, TRUNC(SYSDATE))\
+            """;
 
     @Value("${batch.pod.index}")
     private int podIndex;
@@ -103,7 +104,7 @@ public class BatchConfig {
 
     @Bean
     public Step loadStep(JobRepository jobRepository,
-                         JdbcTransactionManager transactionManager,
+                         PlatformTransactionManager transactionManager,
                          ItemReader<DimensionRecord> itemReader,
                          DimensionItemProcessor itemProcessor,
                          JdbcBatchItemWriter<DimensionRecord> itemWriter,
@@ -180,8 +181,8 @@ public class BatchConfig {
      * JDBC transaction manager used by Spring Batch steps.
      */
     @Bean
-    public JdbcTransactionManager transactionManager(DataSource dataSource) {
-        return new JdbcTransactionManager(dataSource);
+    public PlatformTransactionManager transactionManager(DataSource dataSource) {
+        return new org.springframework.jdbc.support.JdbcTransactionManager(dataSource);
     }
 
     /**
