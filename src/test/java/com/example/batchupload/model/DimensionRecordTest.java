@@ -9,12 +9,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DimensionRecordTest {
 
     @Test
-    void convenienceConstructor_setsNullIdAndCreatedAt() {
-        DimensionRecord record = new DimensionRecord("G1", "P1", "US", "TECH");
-        assertThat(record.id()).isNull();
+    void convenienceConstructor_setsNullCreatedAt() {
+        DimensionRecord record = new DimensionRecord("P1", "G1", "US", "TECH");
         assertThat(record.createdAt()).isNull();
-        assertThat(record.gridId()).isEqualTo("G1");
         assertThat(record.personId()).isEqualTo("P1");
+        assertThat(record.gridId()).isEqualTo("G1");
         assertThat(record.countryCode()).isEqualTo("US");
         assertThat(record.sectorCode()).isEqualTo("TECH");
     }
@@ -22,10 +21,9 @@ class DimensionRecordTest {
     @Test
     void fullConstructor_preservesAllFields() {
         LocalDateTime now = LocalDateTime.now();
-        DimensionRecord record = new DimensionRecord(42L, "G1", "P1", "US", "TECH", now);
-        assertThat(record.id()).isEqualTo(42L);
-        assertThat(record.gridId()).isEqualTo("G1");
+        DimensionRecord record = new DimensionRecord("P1", "G1", "US", "TECH", now);
         assertThat(record.personId()).isEqualTo("P1");
+        assertThat(record.gridId()).isEqualTo("G1");
         assertThat(record.countryCode()).isEqualTo("US");
         assertThat(record.sectorCode()).isEqualTo("TECH");
         assertThat(record.createdAt()).isEqualTo(now);

@@ -19,14 +19,14 @@ public class DimensionItemProcessor implements ItemProcessor<DimensionRecord, Di
 
     @Override
     public DimensionRecord process(DimensionRecord item) {
-        if (isBlank(item.gridId()) && isBlank(item.personId())) {
-            log.debug("Skipping record — both grid_id and person_id are blank");
+        if (isBlank(item.personId())) {
+            log.debug("Skipping record — person_id (primary key) is blank");
             return null;
         }
 
         return new DimensionRecord(
-                truncate(item.gridId(), 100),
                 truncate(item.personId(), 100),
+                truncate(item.gridId(), 100),
                 truncate(item.countryCode(), 10),
                 truncate(item.sectorCode(), 50)
         );

@@ -305,8 +305,8 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         }
 
         return new DimensionRecord(
-                trim(fields[gridIdIndex]),
                 trim(fields[personIdIndex]),
+                trim(fields[gridIdIndex]),
                 trim(fields[countryCodeIndex]),
                 trim(fields[sectorCodeIndex]));
     }

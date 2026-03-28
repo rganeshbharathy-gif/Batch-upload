@@ -66,16 +66,17 @@ public class BatchConfig {
 
     private static final String MERGE_SQL = """
             MERGE INTO dimensions d \
-            USING (SELECT ? AS grid_id, ? AS person_id, ? AS country_code, ? AS sector_code \
+            USING (SELECT ? AS person_id, ? AS grid_id, ? AS country_code, ? AS sector_code \
                    FROM DUAL) s \
-            ON (d.grid_id = s.grid_id AND d.person_id = s.person_id) \
+            ON (d.person_id = s.person_id) \
             WHEN MATCHED THEN \
-                UPDATE SET d.country_code = s.country_code, \
+                UPDATE SET d.grid_id      = s.grid_id, \
+                           d.country_code = s.country_code, \
                            d.sector_code  = s.sector_code, \
                            d.load_date    = TRUNC(SYSDATE) \
             WHEN NOT MATCHED THEN \
-                INSERT (grid_id, person_id, country_code, sector_code, load_date) \
-                VALUES (s.grid_id, s.person_id, s.country_code, s.sector_code, TRUNC(SYSDATE))\
+                INSERT (person_id, grid_id, country_code, sector_code, load_date) \
+                VALUES (s.person_id, s.grid_id, s.country_code, s.sector_code, TRUNC(SYSDATE))\
             """;
 
     @Value("${batch.pod.index}")
@@ -165,8 +166,8 @@ public class BatchConfig {
                 .dataSource(dataSource)
                 .sql(MERGE_SQL)
                 .itemPreparedStatementSetter((item, ps) -> {
-                    ps.setString(1, item.gridId());
-                    ps.setString(2, item.personId());
+                    ps.setString(1, item.personId());
+                    ps.setString(2, item.gridId());
                     ps.setString(3, item.countryCode());
                     ps.setString(4, item.sectorCode());
                 })

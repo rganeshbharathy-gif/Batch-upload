@@ -4,19 +4,18 @@ import java.time.LocalDateTime;
 
 /**
  * Represents a single row in the DIMENSIONS table.
- * {@code id} is auto-generated (IDENTITY) and {@code createdAt} defaults to
- * CURRENT_TIMESTAMP — both are {@code null} when constructing records for insert.
+ * {@code personId} is the natural primary key.
+ * {@code createdAt} defaults to CURRENT_TIMESTAMP in the DB.
  */
 public record DimensionRecord(
-        Long id,
-        String gridId,
         String personId,
+        String gridId,
         String countryCode,
         String sectorCode,
         LocalDateTime createdAt) {
 
-    /** Convenience constructor for inserts — id, createdAt are DB-generated. */
-    public DimensionRecord(String gridId, String personId, String countryCode, String sectorCode) {
-        this(null, gridId, personId, countryCode, sectorCode, null);
+    /** Convenience constructor for inserts — createdAt is DB-generated. */
+    public DimensionRecord(String personId, String gridId, String countryCode, String sectorCode) {
+        this(personId, gridId, countryCode, sectorCode, null);
     }
 }

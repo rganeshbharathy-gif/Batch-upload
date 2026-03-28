@@ -13,5 +13,6 @@
     <include file="db/changelog/006-add-expected-row-count-to-file-log.sql"/>
     <include file="db/changelog/007-add-load-date-to-dimensions.sql"/>
     <include file="db/changelog/008-drop-pod-index-from-dimensions.sql"/>
+    <include file="db/changelog/009-person-id-as-primary-key.sql"/>
 
 </databaseChangeLog>
