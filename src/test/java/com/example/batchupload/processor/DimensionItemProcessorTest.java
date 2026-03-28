@@ -11,7 +11,7 @@ class DimensionItemProcessorTest {
 
     @Test
     void process_validRecord_returnsRecord() throws Exception {
-        DimensionRecord input = new DimensionRecord("G1", "P1", "US", "TECH", 0);
+        DimensionRecord input = new DimensionRecord("G1", "P1", "US", "TECH");
         DimensionRecord result = processor.process(input);
 
         assertThat(result).isNotNull();
@@ -23,20 +23,20 @@ class DimensionItemProcessorTest {
 
     @Test
     void process_bothBlank_returnsNull() throws Exception {
-        DimensionRecord input = new DimensionRecord("", "", "US", "TECH", 0);
+        DimensionRecord input = new DimensionRecord("", "", "US", "TECH");
         assertThat(processor.process(input)).isNull();
     }
 
     @Test
     void process_onlyOneBlank_returnsRecord() throws Exception {
-        DimensionRecord input = new DimensionRecord("", "P1", "US", "TECH", 0);
+        DimensionRecord input = new DimensionRecord("", "P1", "US", "TECH");
         assertThat(processor.process(input)).isNotNull();
     }
 
     @Test
     void process_truncatesLongFields() throws Exception {
         String longGridId = "G".repeat(150);
-        DimensionRecord input = new DimensionRecord(longGridId, "P1", "US", "TECH", 0);
+        DimensionRecord input = new DimensionRecord(longGridId, "P1", "US", "TECH");
         DimensionRecord result = processor.process(input);
 
         assertThat(result).isNotNull();
@@ -45,19 +45,10 @@ class DimensionItemProcessorTest {
 
     @Test
     void process_nullFieldsHandled() throws Exception {
-        DimensionRecord input = new DimensionRecord(null, "P1", null, "TECH", 0);
+        DimensionRecord input = new DimensionRecord(null, "P1", null, "TECH");
         DimensionRecord result = processor.process(input);
 
         assertThat(result).isNotNull();
         assertThat(result.countryCode()).isNull();
-    }
-
-    @Test
-    void process_preservesPodIndex() throws Exception {
-        DimensionRecord input = new DimensionRecord("G1", "P1", "US", "TECH", 7);
-        DimensionRecord result = processor.process(input);
-
-        assertThat(result).isNotNull();
-        assertThat(result.podIndex()).isEqualTo(7);
     }
 }

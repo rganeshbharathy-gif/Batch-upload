@@ -42,7 +42,6 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
     private final FileRange range;
     private final String bucket;
     private final String s3Key;
-    private final int podIndex;
     private final Path localFilePath;
 
     private InputStream s3InputStream;
@@ -60,12 +59,11 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
 
     /** S3-based constructor — resolves column indices from the file header. */
     public ByteRangeFlatFileItemReader(S3FileService s3FileService, FileRange range,
-                                       String bucket, String s3Key, int podIndex) {
+                                       String bucket, String s3Key) {
         this.s3FileService = s3FileService;
         this.range = range;
         this.bucket = bucket;
         this.s3Key = s3Key;
-        this.podIndex = podIndex;
         this.localFilePath = null;
         setName(ByteRangeFlatFileItemReader.class.getSimpleName());
     }
@@ -78,7 +76,6 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         this.range = range;
         this.bucket = null;
         this.s3Key = null;
-        this.podIndex = 0;
         this.localFilePath = localFilePath;
         this.gridIdIndex = gridIdIndex;
         this.personIdIndex = personIdIndex;
@@ -311,8 +308,7 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
                 trim(fields[gridIdIndex]),
                 trim(fields[personIdIndex]),
                 trim(fields[countryCodeIndex]),
-                trim(fields[sectorCodeIndex]),
-                podIndex);
+                trim(fields[sectorCodeIndex]));
     }
 
     private static String trim(String value) {

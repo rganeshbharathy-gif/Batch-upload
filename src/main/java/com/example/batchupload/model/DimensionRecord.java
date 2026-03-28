@@ -13,11 +13,10 @@ public record DimensionRecord(
         String personId,
         String countryCode,
         String sectorCode,
-        Integer podIndex,
         LocalDateTime createdAt) {
 
     /** Convenience constructor for inserts — id, createdAt are DB-generated. */
-    public DimensionRecord(String gridId, String personId, String countryCode, String sectorCode, int podIndex) {
-        this(null, gridId, personId, countryCode, sectorCode, podIndex, null);
+    public DimensionRecord(String gridId, String personId, String countryCode, String sectorCode) {
+        this(null, gridId, personId, countryCode, sectorCode, null);
     }
 }

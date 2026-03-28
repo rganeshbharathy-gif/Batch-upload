@@ -66,17 +66,16 @@ public class BatchConfig {
 
     private static final String MERGE_SQL = """
             MERGE INTO dimensions d \
-            USING (SELECT ? AS grid_id, ? AS person_id, ? AS country_code, ? AS sector_code, ? AS pod_index \
+            USING (SELECT ? AS grid_id, ? AS person_id, ? AS country_code, ? AS sector_code \
                    FROM DUAL) s \
             ON (d.grid_id = s.grid_id AND d.person_id = s.person_id) \
             WHEN MATCHED THEN \
                 UPDATE SET d.country_code = s.country_code, \
                            d.sector_code  = s.sector_code, \
-                           d.pod_index    = s.pod_index, \
                            d.load_date    = TRUNC(SYSDATE) \
             WHEN NOT MATCHED THEN \
-                INSERT (grid_id, person_id, country_code, sector_code, pod_index, load_date) \
-                VALUES (s.grid_id, s.person_id, s.country_code, s.sector_code, s.pod_index, TRUNC(SYSDATE))\
+                INSERT (grid_id, person_id, country_code, sector_code, load_date) \
+                VALUES (s.grid_id, s.person_id, s.country_code, s.sector_code, TRUNC(SYSDATE))\
             """;
 
     @Value("${batch.pod.index}")
@@ -136,7 +135,7 @@ public class BatchConfig {
                 podIndex, totalPods, bucket, s3Key, fileSize,
                 podRange.startByte(), podRange.endByte(), podRange.isLast());
 
-        return new ByteRangeFlatFileItemReader(s3FileService, podRange, bucket, s3Key, podIndex);
+        return new ByteRangeFlatFileItemReader(s3FileService, podRange, bucket, s3Key);
     }
 
     // ── Listener: logs pod processing metadata to DB ───────────────────────────
@@ -170,7 +169,6 @@ public class BatchConfig {
                     ps.setString(2, item.personId());
                     ps.setString(3, item.countryCode());
                     ps.setString(4, item.sectorCode());
-                    ps.setInt(5, item.podIndex());
                 })
                 .build();
     }
