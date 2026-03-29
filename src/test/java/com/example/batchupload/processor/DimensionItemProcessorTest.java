@@ -22,21 +22,29 @@ class DimensionItemProcessorTest {
     }
 
     @Test
-    void process_blankPersonId_returnsNull() throws Exception {
-        DimensionRecord input = new DimensionRecord("", "G1", "US", "TECH");
-        assertThat(processor.process(input)).isNull();
-    }
-
-    @Test
     void process_nullPersonId_returnsNull() throws Exception {
         DimensionRecord input = new DimensionRecord(null, "G1", "US", "TECH");
         assertThat(processor.process(input)).isNull();
     }
 
     @Test
+    void process_emptyPersonId_returnsNull() throws Exception {
+        DimensionRecord input = new DimensionRecord("", "G1", "US", "TECH");
+        assertThat(processor.process(input)).isNull();
+    }
+
+    @Test
+    void process_whitespaceOnlyPersonId_returnsNull() throws Exception {
+        DimensionRecord input = new DimensionRecord("   ", "G1", "US", "TECH");
+        assertThat(processor.process(input)).isNull();
+    }
+
+    @Test
     void process_blankGridId_returnsRecord() throws Exception {
         DimensionRecord input = new DimensionRecord("P1", "", "US", "TECH");
-        assertThat(processor.process(input)).isNotNull();
+        DimensionRecord result = processor.process(input);
+        assertThat(result).isNotNull();
+        assertThat(result.gridId()).isNull(); // empty string sanitised to null
     }
 
     @Test
@@ -47,6 +55,18 @@ class DimensionItemProcessorTest {
 
         assertThat(result).isNotNull();
         assertThat(result.personId()).hasSize(100);
+    }
+
+    @Test
+    void process_stripsWhitespace() throws Exception {
+        DimensionRecord input = new DimensionRecord("  P1  ", "  G1  ", " US ", " TECH ");
+        DimensionRecord result = processor.process(input);
+
+        assertThat(result).isNotNull();
+        assertThat(result.personId()).isEqualTo("P1");
+        assertThat(result.gridId()).isEqualTo("G1");
+        assertThat(result.countryCode()).isEqualTo("US");
+        assertThat(result.sectorCode()).isEqualTo("TECH");
     }
 
     @Test

@@ -19,25 +19,29 @@ public class DimensionItemProcessor implements ItemProcessor<DimensionRecord, Di
 
     @Override
     public DimensionRecord process(DimensionRecord item) {
-        if (isBlank(item.personId())) {
-            log.debug("Skipping record — person_id (primary key) is blank");
+        String personId = sanitise(item.personId(), 100);
+
+        if (personId == null || personId.isEmpty()) {
+            log.debug("Skipping record — person_id (primary key) is null or empty after sanitisation");
             return null;
         }
 
         return new DimensionRecord(
-                truncate(item.personId(), 100),
-                truncate(item.gridId(), 100),
-                truncate(item.countryCode(), 10),
-                truncate(item.sectorCode(), 50)
+                personId,
+                sanitise(item.gridId(), 100),
+                sanitise(item.countryCode(), 10),
+                sanitise(item.sectorCode(), 50)
         );
     }
 
-    private static boolean isBlank(String s) {
-        return s == null || s.isBlank();
-    }
-
-    private static String truncate(String s, int maxLen) {
+    /**
+     * Strips whitespace, truncates to max length, and converts blank strings to null.
+     * Oracle treats empty string as NULL, so this ensures consistency between Java and DB.
+     */
+    private static String sanitise(String s, int maxLen) {
         if (s == null) return null;
+        s = s.strip();
+        if (s.isEmpty()) return null;
         return s.length() > maxLen ? s.substring(0, maxLen) : s;
     }
 }
