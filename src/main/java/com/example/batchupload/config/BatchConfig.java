@@ -75,8 +75,8 @@ public class BatchConfig {
                            d.sector_code  = s.sector_code, \
                            d.load_date    = TRUNC(SYSDATE) \
             WHEN NOT MATCHED THEN \
-                INSERT (person_id, grid_id, country_code, sector_code, load_date) \
-                VALUES (s.person_id, s.grid_id, s.country_code, s.sector_code, TRUNC(SYSDATE))\
+                INSERT (person_id, grid_id, country_code, sector_code, load_date, created_at) \
+                VALUES (s.person_id, s.grid_id, s.country_code, s.sector_code, TRUNC(SYSDATE), CURRENT_TIMESTAMP)\
             """;
 
     @Value("${batch.pod.index}")
