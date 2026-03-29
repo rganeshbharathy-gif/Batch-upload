@@ -166,6 +166,8 @@ public class BatchConfig {
                 .dataSource(dataSource)
                 .sql(MERGE_SQL)
                 .itemPreparedStatementSetter((item, ps) -> {
+                    log.debug("MERGE bind values — personId=[{}] gridId=[{}] countryCode=[{}] sectorCode=[{}]",
+                            item.personId(), item.gridId(), item.countryCode(), item.sectorCode());
                     ps.setString(1, item.personId());
                     ps.setString(2, item.gridId());
                     ps.setString(3, item.countryCode());
