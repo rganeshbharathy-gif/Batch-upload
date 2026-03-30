@@ -13,7 +13,6 @@ import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.job.parameters.JobParameters;
-import org.springframework.batch.core.step.Step;
 
 import java.time.LocalDateTime;
 
@@ -45,7 +44,8 @@ class PodProcessingListenerTest {
         PodProcessingListener listener = createListener();
         StepExecution stepExecution = createStepExecution();
         stepExecution.setReadCount(200);
-        stepExecution.setWriteCount(195);
+        stepExecution.setWriteCount(190);
+        stepExecution.setFilterCount(10);
         stepExecution.setReadSkipCount(3);
         stepExecution.setWriteSkipCount(1);
         stepExecution.setProcessSkipCount(1);
@@ -64,7 +64,8 @@ class PodProcessingListenerTest {
         assertThat(saved.getStartByte()).isEqualTo(1000L);
         assertThat(saved.getEndByte()).isEqualTo(5000L);
         assertThat(saved.getReadCount()).isEqualTo(200L);
-        assertThat(saved.getWriteCount()).isEqualTo(195L);
+        assertThat(saved.getWriteCount()).isEqualTo(190L);
+        assertThat(saved.getFilterCount()).isEqualTo(10L);
         assertThat(saved.getSkipCount()).isEqualTo(5L);
         assertThat(saved.getStatus()).isEqualTo("COMPLETED");
         assertThat(saved.getExpectedRowCount()).isNull();
@@ -87,12 +88,31 @@ class PodProcessingListenerTest {
     void afterStep_nullExpectedRowCountWhenMissing() {
         PodProcessingListener listener = createListener();
         StepExecution stepExecution = createStepExecution();
-        // Do not put footer.expectedRowCount in context
 
         listener.afterStep(stepExecution);
 
         ArgumentCaptor<PodProcessingLog> captor = ArgumentCaptor.forClass(PodProcessingLog.class);
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getExpectedRowCount()).isNull();
+    }
+
+    @Test
+    void afterStep_filterCountCapturesProcessorNullReturns() {
+        PodProcessingListener listener = createListener();
+        StepExecution stepExecution = createStepExecution();
+        stepExecution.setReadCount(100);
+        stepExecution.setWriteCount(90);
+        stepExecution.setFilterCount(10);
+
+        listener.afterStep(stepExecution);
+
+        ArgumentCaptor<PodProcessingLog> captor = ArgumentCaptor.forClass(PodProcessingLog.class);
+        verify(repository).save(captor.capture());
+
+        PodProcessingLog saved = captor.getValue();
+        assertThat(saved.getReadCount()).isEqualTo(100L);
+        assertThat(saved.getWriteCount()).isEqualTo(90L);
+        assertThat(saved.getFilterCount()).isEqualTo(10L);
+        assertThat(saved.getReadCount() - saved.getWriteCount()).isEqualTo(saved.getFilterCount());
     }
 }

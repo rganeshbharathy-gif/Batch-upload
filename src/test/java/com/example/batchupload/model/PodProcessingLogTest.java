@@ -17,8 +17,8 @@ class PodProcessingLogTest {
                 100L, 2, 5,
                 "bucket", "key/file.dat",
                 1000L, 5000L,
-                200L, 195L, 5L,
-                "COMPLETED", 10000L,
+                200L, 190L, 5L,
+                10L, "COMPLETED", 10000L,
                 start, end);
 
         assertThat(log.getJobExecutionId()).isEqualTo(100L);
@@ -29,8 +29,9 @@ class PodProcessingLogTest {
         assertThat(log.getStartByte()).isEqualTo(1000L);
         assertThat(log.getEndByte()).isEqualTo(5000L);
         assertThat(log.getReadCount()).isEqualTo(200L);
-        assertThat(log.getWriteCount()).isEqualTo(195L);
+        assertThat(log.getWriteCount()).isEqualTo(190L);
         assertThat(log.getSkipCount()).isEqualTo(5L);
+        assertThat(log.getFilterCount()).isEqualTo(10L);
         assertThat(log.getStatus()).isEqualTo("COMPLETED");
         assertThat(log.getExpectedRowCount()).isEqualTo(10000L);
         assertThat(log.getStartedAt()).isEqualTo(start);
@@ -39,7 +40,6 @@ class PodProcessingLogTest {
 
     @Test
     void protectedConstructor_existsForJpa() {
-        // Verify JPA no-arg constructor is accessible via reflection
         assertThat(PodProcessingLog.class.getDeclaredConstructors())
                 .anyMatch(c -> c.getParameterCount() == 0);
     }

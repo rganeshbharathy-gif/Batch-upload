@@ -48,6 +48,9 @@ public class PodProcessingLog {
     @Column(name = "SKIP_COUNT")
     private Long skipCount;
 
+    @Column(name = "FILTER_COUNT")
+    private Long filterCount;
+
     @Column(name = "STATUS", nullable = false, length = 20)
     private String status;
 
@@ -66,7 +69,7 @@ public class PodProcessingLog {
                             String s3Bucket, String s3Key,
                             long startByte, long endByte,
                             long readCount, long writeCount, long skipCount,
-                            String status, Long expectedRowCount,
+                            long filterCount, String status, Long expectedRowCount,
                             Instant startedAt, Instant finishedAt) {
         this.jobExecutionId = jobExecutionId;
         this.podIndex = podIndex;
@@ -78,6 +81,7 @@ public class PodProcessingLog {
         this.readCount = readCount;
         this.writeCount = writeCount;
         this.skipCount = skipCount;
+        this.filterCount = filterCount;
         this.status = status;
         this.expectedRowCount = expectedRowCount;
         this.startedAt = startedAt;
@@ -95,6 +99,7 @@ public class PodProcessingLog {
     public Long getReadCount() { return readCount; }
     public Long getWriteCount() { return writeCount; }
     public Long getSkipCount() { return skipCount; }
+    public Long getFilterCount() { return filterCount; }
     public String getStatus() { return status; }
     public Long getExpectedRowCount() { return expectedRowCount; }
     public Instant getStartedAt() { return startedAt; }

@@ -44,6 +44,7 @@ public class PodProcessingListener implements StepExecutionListener {
     public void afterStep(StepExecution stepExecution) {
         long readCount = stepExecution.getReadCount();
         long writeCount = stepExecution.getWriteCount();
+        long filterCount = stepExecution.getFilterCount();
         long skipCount = stepExecution.getReadSkipCount()
                 + stepExecution.getWriteSkipCount()
                 + stepExecution.getProcessSkipCount();
@@ -66,6 +67,7 @@ public class PodProcessingListener implements StepExecutionListener {
                 readCount,
                 writeCount,
                 skipCount,
+                filterCount,
                 status,
                 expectedRowCount,
                 stepExecution.getStartTime().toInstant(),
@@ -73,7 +75,7 @@ public class PodProcessingListener implements StepExecutionListener {
 
         podProcessingLogRepository.save(podLog);
 
-        log.info("Pod {}/{} — wrote processing log: read={} written={} skipped={} status={} range=[{}, {}) expectedRowCount={}",
-                podIndex, totalPods, readCount, writeCount, skipCount, status, startByte, endByte, expectedRowCount);
+        log.info("Pod {}/{} — read={} written={} filtered={} skipped={} status={} range=[{}, {}) expectedRowCount={}",
+                podIndex, totalPods, readCount, writeCount, filterCount, skipCount, status, startByte, endByte, expectedRowCount);
     }
 }
