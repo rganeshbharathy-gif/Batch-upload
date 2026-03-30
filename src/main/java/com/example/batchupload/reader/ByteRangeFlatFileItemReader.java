@@ -250,8 +250,8 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
             if (range.isLast()) {
                 reader.mark(BUFFER_SIZE);
                 String nextLine = reader.readLine();
-                if (nextLine == null) {
-                    // This line is the footer — extract expected row count from index 1
+                if (nextLine == null && isFooter(line)) {
+                    // This line is the footer — extract expected row count
                     parseFooter(line);
                     return null;
                 }
@@ -278,6 +278,24 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
      * Parses the footer line to extract the expected row count.
      * Footer format: {@code FOOTER|12345|...} — index 1 (2nd field) is the row count.
      */
+    /**
+     * Checks if the line looks like a footer row.
+     * Footer format: {@code FOOTER|<row_count>|...} — first field must be "FOOTER"
+     * and second field must be a parseable number.
+     */
+    private boolean isFooter(String line) {
+        if (line == null || line.isBlank()) return false;
+        String[] fields = line.split("\\|", 3);
+        if (fields.length < 2) return false;
+        if (!"FOOTER".equalsIgnoreCase(fields[0].trim())) return false;
+        try {
+            Long.parseLong(fields[1].trim());
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     private void parseFooter(String footerLine) {
         try {
             String[] fields = footerLine.split("\\|", -1);

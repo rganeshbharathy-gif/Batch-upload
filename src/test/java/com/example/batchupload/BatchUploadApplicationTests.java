@@ -108,4 +108,48 @@ class BatchUploadApplicationTests {
 
         assertThat(records).hasSize(2);
     }
+
+    @Test
+    void readerShouldParseFooterAndNotLoseLastDataLine() throws Exception {
+        Path file = tempDir.resolve("with-footer.txt");
+        Files.writeString(file, "a|b|c|d\ne|f|g|h\nFOOTER|2|extra\n");
+
+        FileRange range = FileRange.forPod(Files.size(file), 0, 1);
+        ByteRangeFlatFileItemReader reader = new ByteRangeFlatFileItemReader(
+                file, range, 0, 1, 2, 3);
+
+        ExecutionContext ctx = new ExecutionContext();
+        reader.open(ctx);
+
+        List<DimensionRecord> records = new ArrayList<>();
+        DimensionRecord r;
+        while ((r = reader.read()) != null) records.add(r);
+        reader.update(ctx);
+        reader.close();
+
+        // Both data lines should be read — footer should NOT eat the last data line
+        assertThat(records).hasSize(2);
+        // Footer row count should be extracted
+        assertThat(ctx.getLong("footer.expectedRowCount")).isEqualTo(2L);
+    }
+
+    @Test
+    void readerShouldNotTreatLastDataLineAsFooter() throws Exception {
+        // File with NO footer — last line is data
+        Path file = tempDir.resolve("no-footer.txt");
+        Files.writeString(file, "a|b|c|d\ne|f|g|h\n");
+
+        FileRange range = FileRange.forPod(Files.size(file), 0, 1);
+        ByteRangeFlatFileItemReader reader = new ByteRangeFlatFileItemReader(
+                file, range, 0, 1, 2, 3);
+        reader.open(new ExecutionContext());
+
+        List<DimensionRecord> records = new ArrayList<>();
+        DimensionRecord r;
+        while ((r = reader.read()) != null) records.add(r);
+        reader.close();
+
+        // Both lines are data — neither should be lost
+        assertThat(records).hasSize(2);
+    }
 }
