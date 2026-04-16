@@ -4,33 +4,36 @@
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- 1. DIMENSIONS table
+-- DIMENSIONS table
+--
+-- File-column → table-column mapping:
+--   GRID_ID         → grid_id
+--   CSI_ID          → person_id       (primary key; merge target)
+--   CTY_OF_CTZN_CD  → country_code
+--   ECON_SEC_CD     → eco_sector_code
+--                     loaded_at       (set to job start time on every merge)
 -- -----------------------------------------------------------------------------
 CREATE TABLE dimensions (
-    id             NUMBER         GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    csi_id         VARCHAR2(100),
-    person_id      VARCHAR2(100),
-    country_code   VARCHAR2(10),
-    economic_code  VARCHAR2(50),
-    created_at     TIMESTAMP      DEFAULT CURRENT_TIMESTAMP NOT NULL
+    person_id        VARCHAR2(100)  NOT NULL,
+    grid_id          VARCHAR2(100),
+    country_code     VARCHAR2(10),
+    eco_sector_code  NUMBER(19),
+    loaded_at        TIMESTAMP      NOT NULL,
+    CONSTRAINT pk_dimensions PRIMARY KEY (person_id)
 );
 
--- Index to support queries by the four business columns
-CREATE INDEX idx_dim_csi_person
-    ON dimensions (csi_id, person_id);
-
-CREATE INDEX idx_dim_country_economic
-    ON dimensions (country_code, economic_code);
+CREATE INDEX idx_dim_country_sector
+    ON dimensions (country_code, eco_sector_code);
 
 -- -----------------------------------------------------------------------------
--- 2. Spring Batch metadata tables (Oracle dialect)
---    Only needed if spring.batch.jdbc.initialize-schema=never (production default).
---    Source: spring-batch-core JAR → org/springframework/batch/core/schema-oracle10g.sql
+-- Spring Batch 6 metadata tables (Oracle dialect)
+-- Only needed if spring.batch.jdbc.initialize-schema=never (production default).
+-- Canonical source: spring-batch-core JAR → org/springframework/batch/core/schema-oracle.sql
 -- -----------------------------------------------------------------------------
 
-CREATE SEQUENCE BATCH_STEP_EXECUTION_SEQ START WITH 0 MINVALUE 0 MAXVALUE 9223372036854775807 NOCYCLE;
-CREATE SEQUENCE BATCH_JOB_EXECUTION_SEQ  START WITH 0 MINVALUE 0 MAXVALUE 9223372036854775807 NOCYCLE;
-CREATE SEQUENCE BATCH_JOB_SEQ            START WITH 0 MINVALUE 0 MAXVALUE 9223372036854775807 NOCYCLE;
+CREATE SEQUENCE BATCH_STEP_EXECUTION_SEQ START WITH 1 MINVALUE 1 MAXVALUE 9223372036854775807 NOCYCLE;
+CREATE SEQUENCE BATCH_JOB_EXECUTION_SEQ  START WITH 1 MINVALUE 1 MAXVALUE 9223372036854775807 NOCYCLE;
+CREATE SEQUENCE BATCH_JOB_SEQ            START WITH 1 MINVALUE 1 MAXVALUE 9223372036854775807 NOCYCLE;
 
 CREATE TABLE BATCH_JOB_INSTANCE (
     JOB_INSTANCE_ID NUMBER(19,0)  NOT NULL PRIMARY KEY,

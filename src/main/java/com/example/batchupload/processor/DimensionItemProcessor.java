@@ -1,36 +1,41 @@
 package com.example.batchupload.processor;
 
 import com.example.batchupload.model.DimensionRecord;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.item.ItemProcessor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.infrastructure.item.ItemProcessor;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 
 /**
  * Validates and sanitises each {@link DimensionRecord} before it reaches the writer.
  *
- * <p>Returning {@code null} causes Spring Batch to silently skip the item — no exception,
- * no retry, no rollback. Use this for business-rule filtering (e.g. blank mandatory fields).
+ * <p>Returning {@code null} silently filters the item; the chunk continues without
+ * incrementing the skip counter.
  */
-@Slf4j
 @Component
 public class DimensionItemProcessor implements ItemProcessor<DimensionRecord, DimensionRecord> {
 
+    private static final Logger log = LoggerFactory.getLogger(DimensionItemProcessor.class);
+
+    private static final int PERSON_ID_MAX   = 100;
+    private static final int GRID_ID_MAX     = 100;
+    private static final int COUNTRY_MAX     = 10;
+
     @Override
     public DimensionRecord process(@NonNull DimensionRecord item) {
-        // Drop records where the two primary identifiers are both blank
-        if (isBlank(item.getCsiId()) && isBlank(item.getPersonId())) {
-            log.debug("Skipping record — both csi_id and person_id are blank");
+        // person_id is the merge key — drop rows without it.
+        if (isBlank(item.personId())) {
+            log.debug("Skipping record — person_id is blank");
             return null;
         }
 
-        // Truncate to Oracle column limits to avoid ORA-12899
-        item.setCsiId(truncate(item.getCsiId(), 100));
-        item.setPersonId(truncate(item.getPersonId(), 100));
-        item.setCountryCode(truncate(item.getCountryCode(), 10));
-        item.setEconomicCode(truncate(item.getEconomicCode(), 50));
-
-        return item;
+        return new DimensionRecord(
+                truncate(item.gridId(),      GRID_ID_MAX),
+                truncate(item.personId(),    PERSON_ID_MAX),
+                truncate(item.countryCode(), COUNTRY_MAX),
+                item.ecoSectorCode(),
+                item.loadedAt());
     }
 
     private static boolean isBlank(String s) {

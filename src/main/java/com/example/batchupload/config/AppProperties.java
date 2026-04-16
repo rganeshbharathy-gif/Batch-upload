@@ -1,57 +1,50 @@
 package com.example.batchupload.config;
 
-import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
 
 /**
  * Strongly-typed configuration bound from {@code application.yml}.
  * All values can be overridden via environment variables using Spring Boot's
- * relaxed binding (e.g. {@code APP_FILE_PATH}, {@code APP_COLUMNS_CSI_ID_INDEX}).
+ * relaxed binding (e.g. {@code APP_FILE_PATH}, {@code APP_COLUMNS_GRID_ID}).
  */
-@Data
-@Component
 @ConfigurationProperties(prefix = "app")
-public class AppProperties {
+public record AppProperties(File file, Columns columns, Batch batch) {
 
-    private File file = new File();
-    private Columns columns = new Columns();
-    private Batch batch = new Batch();
-
-    @Data
-    public static class File {
-        /** Absolute path to the input pipe-delimited file (mounted PVC in K8s). */
-        private String path = "/data/input.txt";
+    public AppProperties {
+        if (file == null)    file    = new File("/data/input.txt");
+        if (columns == null) columns = Columns.defaults();
+        if (batch == null)   batch   = Batch.defaults();
     }
 
-    @Data
-    public static class Columns {
-        /** Zero-based column index for csi_id in the pipe-delimited file. */
-        private int csiIdIndex = 0;
-
-        /** Zero-based column index for person_id in the pipe-delimited file. */
-        private int personIdIndex = 1;
-
-        /** Zero-based column index for country_code in the pipe-delimited file. */
-        private int countryCodeIndex = 2;
-
-        /** Zero-based column index for economic_code in the pipe-delimited file. */
-        private int economicCodeIndex = 3;
+    /** @param path Absolute path to the input pipe-delimited file (mounted PVC in K8s). */
+    public record File(String path) {
     }
 
-    @Data
-    public static class Batch {
-        /**
-         * Number of records processed per JDBC batch insert.
-         * Optimal range for Oracle: 2 000 – 10 000.
-         */
-        private int chunkSize = 5000;
+    /**
+     * Header-row token (case-insensitive) that identifies each required column
+     * in the input file. Defaults match the vendor specification.
+     */
+    public record Columns(
+            String gridId,
+            String personId,
+            String countryCode,
+            String ecoSectorCode) {
 
-        /**
-         * Number of parallel threads used within this pod.
-         * Each thread reads its own sub-range of the pod's byte range.
-         * Set to 1 to keep it single-threaded (simplest, safest).
-         */
-        private int threadPoolSize = 4;
+        public static Columns defaults() {
+            return new Columns("GRID_ID", "CSI_ID", "CTY_OF_CTZN_CD", "ECON_SEC_CD");
+        }
+    }
+
+    /**
+     * @param chunkSize      Rows per JDBC batch merge. Oracle sweet-spot: 2 000–10 000.
+     * @param threadPoolSize Worker threads within this pod. Total concurrency
+     *                       across the cluster = {@code TOTAL_PODS × threadPoolSize}.
+     * @param skipLimit      Max unrecoverable parse errors tolerated before the step fails.
+     */
+    public record Batch(int chunkSize, int threadPoolSize, int skipLimit) {
+
+        public static Batch defaults() {
+            return new Batch(5000, 4, 10_000);
+        }
     }
 }

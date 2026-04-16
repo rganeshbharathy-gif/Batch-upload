@@ -10,46 +10,39 @@ spring:
     driver-class-name: oracle.jdbc.OracleDriver
 
     hikari:
-      # One connection per worker thread + a few spare for Spring Batch metadata writes.
-      # Formula: threadPoolSize * pods_per_node + 2 (for metadata)
+      # Formula: threadPoolSize * pods_per_node + 2 (for batch metadata)
       maximum-pool-size: ${HIKARI_MAX_POOL:10}
       minimum-idle: ${HIKARI_MIN_IDLE:4}
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000
-      # Oracle-specific: improves batch insert throughput
       data-source-properties:
         defaultRowPrefetch: 200
         oracle.jdbc.implicitStatementCacheSize: 20
 
-  # ── Spring Batch ──────────────────────────────────────────────────────────
+  # ── Spring Batch 6 ────────────────────────────────────────────────────────
   batch:
     job:
-      # Disable auto-run; BatchUploadApplication.run() drives the launch explicitly
-      enabled: false
+      enabled: false   # ApplicationRunner launches the job explicitly
     jdbc:
-      # Tables must already exist (created via schema-oracle.sql)
-      initialize-schema: never
+      initialize-schema: never   # metadata tables provisioned via schema-oracle.sql
 
 # ── Application properties ────────────────────────────────────────────────
 app:
   file:
-    # Mount path of the shared PersistentVolumeClaim in K8s
     path: ${FILE_PATH:/data/input.txt}
 
+  # Header tokens as they appear in line 2 of the input file (case-insensitive match).
   columns:
-    # Zero-based column indices in the pipe-delimited file.
-    # Override with env vars: APP_COLUMNS_CSI_ID_INDEX, etc.
-    csi-id-index: ${CSI_ID_INDEX:0}
-    person-id-index: ${PERSON_ID_INDEX:1}
-    country-code-index: ${COUNTRY_CODE_INDEX:2}
-    economic-code-index: ${ECONOMIC_CODE_INDEX:3}
+    grid-id: ${COL_GRID_ID:GRID_ID}
+    person-id: ${COL_PERSON_ID:CSI_ID}
+    country-code: ${COL_COUNTRY_CODE:CTY_OF_CTZN_CD}
+    eco-sector-code: ${COL_ECO_SECTOR_CODE:ECON_SEC_CD}
 
   batch:
-    # Rows per JDBC batch insert. Tune for Oracle: 2000–10000 is typical.
     chunk-size: ${CHUNK_SIZE:5000}
-    # Worker threads within this pod. Total concurrency = TOTAL_PODS × threadPoolSize.
     thread-pool-size: ${THREAD_POOL_SIZE:4}
+    skip-limit: ${SKIP_LIMIT:10000}
 
 # ── Actuator health/readiness for K8s probes ─────────────────────────────
 management:
@@ -67,10 +60,6 @@ management:
       enabled: true
     readinessState:
       enabled: true
-  metrics:
-    export:
-      prometheus:
-        enabled: true
 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging:
@@ -78,11 +67,9 @@ logging:
     root: INFO
     com.example.batchupload: INFO
     org.springframework.batch: INFO
-    # Set to DEBUG during initial testing; revert to INFO in production
-    # com.example.batchupload.reader: DEBUG
 
 ---
-# ── Test profile: uses H2 in-memory DB instead of Oracle ─────────────────
+# ── Test profile: H2 in Oracle-compat mode ───────────────────────────────
 spring:
   config:
     activate:

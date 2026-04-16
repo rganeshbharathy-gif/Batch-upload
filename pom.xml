@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.3</version>
+        <version>4.0.0</version>
         <relativePath/>
     </parent>
 
@@ -17,21 +17,25 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
     <name>batch-upload</name>
-    <description>Spring Batch Oracle Loader with Kubernetes Indexed Job partitioning</description>
+    <description>Spring Batch 6 Oracle loader — daily pipe-delimited file ingestion with upsert</description>
 
     <properties>
-        <java.version>17</java.version>
-        <oracle.jdbc.version>23.3.0.23.09</oracle.jdbc.version>
+        <java.version>25</java.version>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <maven.compiler.release>25</maven.compiler.release>
+        <spring-batch.version>6.0.0</spring-batch.version>
+        <oracle.jdbc.version>23.6.0.24.10</oracle.jdbc.version>
     </properties>
 
     <dependencies>
-        <!-- Spring Batch -->
+        <!-- Spring Batch 6 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-batch</artifactId>
         </dependency>
 
-        <!-- JDBC for Oracle -->
+        <!-- JDBC -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
@@ -44,7 +48,7 @@
             <version>${oracle.jdbc.version}</version>
         </dependency>
 
-        <!-- Oracle UCP (Universal Connection Pool) - optional but recommended -->
+        <!-- Oracle UCP -->
         <dependency>
             <groupId>com.oracle.database.jdbc</groupId>
             <artifactId>ucp</artifactId>
@@ -57,14 +61,7 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
-        <!-- Lombok -->
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <optional>true</optional>
-        </dependency>
-
-        <!-- Micrometer for metrics -->
+        <!-- Micrometer -->
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
@@ -93,13 +90,12 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
-                    <excludes>
-                        <exclude>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </exclude>
-                    </excludes>
+                    <release>${java.version}</release>
                 </configuration>
             </plugin>
         </plugins>

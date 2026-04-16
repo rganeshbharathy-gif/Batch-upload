@@ -1,105 +1,97 @@
 package com.example.batchupload.reader;
 
 import com.example.batchupload.model.DimensionRecord;
+import com.example.batchupload.model.FileLayout.ColumnIndices;
 import com.example.batchupload.model.FileRange;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.item.ItemStreamException;
-import org.springframework.batch.item.support.AbstractItemStreamItemReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ItemStreamException;
+import org.springframework.batch.infrastructure.item.support.AbstractItemStreamItemReader;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.channels.FileChannel;
+import java.time.Instant;
 
 /**
- * Reads a specific byte range of a pipe-delimited flat file.
+ * Reads a specific byte range of the data region in a pipe-delimited file.
  *
- * <p><b>Byte-boundary handling:</b>
+ * <p><b>Responsibilities</b>
  * <ul>
- *   <li>Seeks the {@link FileChannel} directly to {@code startByte} — O(1), no data reading.
- *   <li>If {@code startByte > 0} it skips the first (partial) line so only the pod that
- *       owns the previous range is responsible for that line.
- *   <li>Reads until the current line-based byte cursor exceeds {@code endByte},
- *       except for the last pod which reads to EOF.
+ *   <li>Seeks to {@code startByte}, discarding the first partial line unless
+ *       the range begins at the file's {@code dataStart} (guaranteeing every
+ *       line is owned by exactly one partition).</li>
+ *   <li>Reads until the byte cursor crosses {@code endByte}; the last partition
+ *       may read slightly past it to finish the final record.</li>
+ *   <li>Extracts the four configured columns by index, constructs a
+ *       {@link DimensionRecord}, and stamps it with the shared load timestamp.</li>
+ *   <li>Leaves numeric parsing of {@code ecoSectorCode} to the processor so that
+ *       a malformed value can be skipped without corrupting the byte cursor.</li>
  * </ul>
- *
- * <p><b>Column extraction:</b> Column indices are zero-based positions in the
- * pipe-delimited row. They are configurable via {@code application.yml} so that
- * the implementation never needs to be changed when the upstream file layout changes.
  */
-@Slf4j
 public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<DimensionRecord> {
 
-    private static final int BUFFER_SIZE = 128 * 1024; // 128 KB per reader
+    private static final Logger log = LoggerFactory.getLogger(ByteRangeFlatFileItemReader.class);
+    private static final int BUFFER_SIZE = 128 * 1024;
 
     private final Path filePath;
     private final FileRange range;
-    private final int csiIdIndex;
-    private final int personIdIndex;
-    private final int countryCodeIndex;
-    private final int economicCodeIndex;
+    private final long dataStart;
+    private final ColumnIndices columns;
+    private final Instant loadedAt;
 
     private FileChannel fileChannel;
     private BufferedReader reader;
-
-    /** Running byte-position cursor (approximated via line lengths). */
     private long byteCursor;
-
-    /** Count of lines successfully read and parsed. */
     private long linesRead;
-
-    /** Count of lines skipped due to parse errors. */
     private long linesSkipped;
 
-    public ByteRangeFlatFileItemReader(
-            Path filePath,
-            FileRange range,
-            int csiIdIndex,
-            int personIdIndex,
-            int countryCodeIndex,
-            int economicCodeIndex) {
+    public ByteRangeFlatFileItemReader(Path filePath,
+                                       FileRange range,
+                                       long dataStart,
+                                       ColumnIndices columns,
+                                       Instant loadedAt) {
         this.filePath = filePath;
         this.range = range;
-        this.csiIdIndex = csiIdIndex;
-        this.personIdIndex = personIdIndex;
-        this.countryCodeIndex = countryCodeIndex;
-        this.economicCodeIndex = economicCodeIndex;
+        this.dataStart = dataStart;
+        this.columns = columns;
+        this.loadedAt = loadedAt;
         setName(ByteRangeFlatFileItemReader.class.getSimpleName());
     }
-
-    // -------------------------------------------------------------------------
-    // ItemStream lifecycle
-    // -------------------------------------------------------------------------
 
     @Override
     public void open(ExecutionContext executionContext) throws ItemStreamException {
         try {
             fileChannel = FileChannel.open(filePath, StandardOpenOption.READ);
-            fileChannel.position(range.startByte());
 
-            // Wrap the channel in a buffered reader for efficient line reading
+            // If startByte is mid-line, the previous partition's reader will have
+            // already consumed that line — we must discard it here. Skip this only
+            // when the preceding byte is a newline (the boundary aligned cleanly)
+            // or when we're at the very start of the data region.
+            boolean skipPartial = range.startByte() > dataStart
+                    && !precedingByteIsNewline(fileChannel, range.startByte());
+
+            fileChannel.position(range.startByte());
             reader = new BufferedReader(
                     new InputStreamReader(Channels.newInputStream(fileChannel), StandardCharsets.UTF_8),
                     BUFFER_SIZE);
 
             byteCursor = range.startByte();
-
-            // Skip the partial line that "belongs" to the previous pod
-            if (range.startByte() > 0) {
+            if (skipPartial) {
                 String partial = reader.readLine();
                 if (partial != null) {
-                    byteCursor += partial.length() + 1; // +1 for '\n'
+                    byteCursor += partial.getBytes(StandardCharsets.UTF_8).length + 1;
                 }
             }
 
-            log.info("Opened reader — file={} startByte={} endByte={} isLast={}",
-                    filePath, range.startByte(), range.endByte(), range.isLast());
-
+            log.info("Opened reader — file={} range=[{}, {}) isLast={} dataStart={}",
+                    filePath, range.startByte(), range.endByte(), range.isLast(), dataStart);
         } catch (IOException e) {
             throw new ItemStreamException("Cannot open file: " + filePath, e);
         }
@@ -123,72 +115,70 @@ public class ByteRangeFlatFileItemReader extends AbstractItemStreamItemReader<Di
         }
     }
 
-    // -------------------------------------------------------------------------
-    // ItemReader
-    // -------------------------------------------------------------------------
-
     @Override
     public DimensionRecord read() throws Exception {
         while (true) {
-            // Non-last pods stop when the cursor moves past their end boundary.
-            // We check BEFORE reading the next line so we never steal lines
-            // that belong to the next pod's range.
-            if (!range.isLast() && byteCursor >= range.endByte()) {
-                log.debug("Reached end boundary {} at cursor {}", range.endByte(), byteCursor);
+            // dataEnd is exact (points at the footer's first byte), and the byte
+            // cursor is incremented by exact UTF-8 byte lengths, so every partition
+            // — including the last — stops precisely at its endByte boundary.
+            if (byteCursor >= range.endByte()) {
                 return null;
             }
 
             String line = reader.readLine();
             if (line == null) {
-                return null; // EOF
+                return null;
             }
-
-            // Advance cursor (line length + newline byte).
-            // For ASCII/Latin-1 data this is exact; for UTF-8 multi-byte it is an
-            // approximation — acceptable because boundary overlap is at most a few lines.
-            byteCursor += line.length() + 1;
+            byteCursor += line.getBytes(StandardCharsets.UTF_8).length + 1;
 
             if (line.isBlank()) {
                 linesSkipped++;
-                continue; // skip empty lines
+                continue;
             }
 
             DimensionRecord record = parseLine(line);
             if (record == null) {
                 linesSkipped++;
-                continue; // skip malformed lines; logged inside parseLine
+                continue;
             }
-
             linesRead++;
             return record;
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Parsing
-    // -------------------------------------------------------------------------
-
-    private static final int MIN_REQUIRED_COLUMNS_OFFSET = 1; // inclusive index check
-
     private DimensionRecord parseLine(String line) {
-        // Split with limit -1 to preserve trailing empty fields
         String[] fields = line.split("\\|", -1);
-
-        int maxIndex = Math.max(Math.max(csiIdIndex, personIdIndex),
-                Math.max(countryCodeIndex, economicCodeIndex));
-
-        if (fields.length <= maxIndex) {
-            log.warn("Skipping malformed line (only {} fields, need at least {}): [{}...]",
-                    fields.length, maxIndex + 1, truncate(line, 120));
+        if (fields.length <= columns.maxIndex()) {
+            log.warn("Skipping malformed line ({} fields, need {}): [{}]",
+                    fields.length, columns.maxIndex() + 1, truncate(line, 120));
             return null;
         }
 
-        DimensionRecord record = new DimensionRecord();
-        record.setCsiId(trim(fields[csiIdIndex]));
-        record.setPersonId(trim(fields[personIdIndex]));
-        record.setCountryCode(trim(fields[countryCodeIndex]));
-        record.setEconomicCode(trim(fields[economicCodeIndex]));
-        return record;
+        String ecoRaw = trim(fields[columns.ecoSectorCode()]);
+        Long ecoSector;
+        try {
+            ecoSector = (ecoRaw == null || ecoRaw.isEmpty()) ? null : Long.parseLong(ecoRaw);
+        } catch (NumberFormatException e) {
+            log.warn("Skipping line with non-numeric eco_sector_code='{}': [{}]",
+                    ecoRaw, truncate(line, 120));
+            return null;
+        }
+
+        return new DimensionRecord(
+                trim(fields[columns.gridId()]),
+                trim(fields[columns.personId()]),
+                trim(fields[columns.countryCode()]),
+                ecoSector,
+                loadedAt);
+    }
+
+    private static boolean precedingByteIsNewline(FileChannel ch, long pos) throws IOException {
+        if (pos <= 0) return false;
+        java.nio.ByteBuffer one = java.nio.ByteBuffer.allocate(1);
+        ch.position(pos - 1);
+        if (ch.read(one) != 1) return false;
+        byte b = one.array()[0];
+        return b == '\n' || b == '\r';
     }
 
     private static String trim(String value) {

@@ -1,67 +1,55 @@
 package com.example.batchupload.config;
 
 import com.example.batchupload.model.DimensionRecord;
+import com.example.batchupload.model.FileLayout;
 import com.example.batchupload.model.FileRange;
 import com.example.batchupload.partitioner.PodByteRangePartitioner;
 import com.example.batchupload.processor.DimensionItemProcessor;
 import com.example.batchupload.reader.ByteRangeFlatFileItemReader;
+import com.example.batchupload.reader.FileLayoutScanner;
 import com.example.batchupload.writer.DimensionItemWriter;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.partition.support.TaskExecutorPartitionHandler;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.item.ExecutionContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
 
 /**
- * Spring Batch configuration for the Dimension Load job.
+ * Spring Batch configuration for the daily Dimension Load job (Spring Batch 6).
  *
- * <h2>Architecture</h2>
- * <pre>
- *  Kubernetes Indexed Job
- *  ┌──────────────────────────────────────┐
- *  │  Pod 0  (JOB_COMPLETION_INDEX=0)     │
- *  │  ┌────────────────────────────────┐  │
- *  │  │ dimensionLoadJob               │  │
- *  │  │   managerStep                  │  │
- *  │  │     PodByteRangePartitioner    │  │
- *  │  │       ├─ workerStep-thread-0   │  │   ─┐
- *  │  │       ├─ workerStep-thread-1   │  │    │  threadPoolSize threads
- *  │  │       └─ workerStep-thread-N   │  │   ─┘
- *  │  └────────────────────────────────┘  │
- *  └──────────────────────────────────────┘
- *       ...repeated for Pod 1, 2, ..., N-1
- * </pre>
- *
- * <h2>Parallelism</h2>
- * <ul>
- *   <li><b>Cross-pod</b>: Each pod reads a distinct byte range of the shared file.
- *       {@code JOB_COMPLETION_INDEX} (0-based) and {@code TOTAL_PODS} drive the split.
- *   <li><b>Within-pod</b>: The pod's range is further divided into {@code threadPoolSize}
- *       sub-ranges, each handled by one worker thread.
- * </ul>
- *
- * <h2>Fault tolerance</h2>
- * All Spring Batch metadata (job/step execution state) is persisted in the shared Oracle
- * database, so a failed pod can be restarted without re-processing already-committed chunks.
+ * <h2>Lifecycle per JVM</h2>
+ * <ol>
+ *   <li>{@link FileLayoutScanner} reads the vendor metadata line, parses the header
+ *       to resolve the four required column indices, and locates the footer row's
+ *       byte offset. Only this region {@code [dataStart, dataEnd)} is partitioned.</li>
+ *   <li>{@link FileRange#forPod} carves out this pod's slice of the data region.</li>
+ *   <li>{@link PodByteRangePartitioner} divides the pod's slice across worker threads.</li>
+ *   <li>Each worker thread runs the same {@code workerStep} with its own
+ *       step-scoped {@link ByteRangeFlatFileItemReader}.</li>
+ *   <li>{@link DimensionItemWriter} MERGEs each chunk into Oracle on {@code person_id}.</li>
+ * </ol>
  */
-@Slf4j
 @Configuration
-@RequiredArgsConstructor
 public class BatchConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(BatchConfig.class);
 
     private final AppProperties props;
     private final DimensionItemProcessor processor;
@@ -69,145 +57,126 @@ public class BatchConfig {
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;
 
-    // ── K8s environment variables ──────────────────────────────────────────────
-
     @Value("${JOB_COMPLETION_INDEX:0}")
     private int podIndex;
 
     @Value("${TOTAL_PODS:1}")
     private int totalPods;
 
+    public BatchConfig(AppProperties props,
+                       DimensionItemProcessor processor,
+                       DimensionItemWriter writer,
+                       JobRepository jobRepository,
+                       PlatformTransactionManager transactionManager) {
+        this.props = props;
+        this.processor = processor;
+        this.writer = writer;
+        this.jobRepository = jobRepository;
+        this.transactionManager = transactionManager;
+    }
+
+    // ── File layout (scanned once) ────────────────────────────────────────────
+
+    @Bean
+    public FileLayout fileLayout() throws IOException {
+        Path path = Path.of(props.file().path());
+        AppProperties.Columns c = props.columns();
+        FileLayout layout = new FileLayoutScanner(
+                path, c.gridId(), c.personId(), c.countryCode(), c.ecoSectorCode()).scan();
+        log.info("File layout resolved — dataStart={} dataEnd={} dataLength={} columns={}",
+                layout.dataStart(), layout.dataEnd(), layout.dataLength(), layout.columnIndex());
+        return layout;
+    }
+
+    /** Captured once per JVM so every merged row shares one timestamp. */
+    @Bean
+    public Instant loadedAt(Clock clock) {
+        return Instant.now(clock);
+    }
+
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
+    }
+
     // ── Job ───────────────────────────────────────────────────────────────────
 
     @Bean
-    public Job dimensionLoadJob() {
+    public Job dimensionLoadJob(Step managerStep) {
         return new JobBuilder("dimensionLoadJob-pod" + podIndex, jobRepository)
-                .start(managerStep())
+                .start(managerStep)
                 .build();
     }
 
-    // ── Manager step (partitions & dispatches to worker threads) ──────────────
+    // ── Manager step ──────────────────────────────────────────────────────────
 
     @Bean
-    public Step managerStep() {
-        return new StepBuilder("managerStep", jobRepository)
-                .partitioner("workerStep", podByteRangePartitioner())
-                .partitionHandler(partitionHandler())
-                .build();
-    }
-
-    @Bean
-    public PodByteRangePartitioner podByteRangePartitioner() {
-        Path filePath = Path.of(props.getFile().getPath());
-        long fileSize = resolveFileSize(filePath);
-        FileRange podRange = FileRange.forPod(fileSize, podIndex, totalPods);
-
-        log.info("Pod {}/{} — file size={} bytes, range=[{}, {}), isLast={}",
-                podIndex, totalPods, fileSize,
-                podRange.startByte(), podRange.endByte(), podRange.isLast());
-
-        return new PodByteRangePartitioner(filePath, podRange);
-    }
-
-    @Bean
-    public TaskExecutorPartitionHandler partitionHandler() {
+    public Step managerStep(Step workerStep, FileLayout layout) {
         TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
-        handler.setStep(workerStep());
+        handler.setStep(workerStep);
         handler.setTaskExecutor(batchTaskExecutor());
-        handler.setGridSize(props.getBatch().getThreadPoolSize());
-        return handler;
+        handler.setGridSize(props.batch().threadPoolSize());
+
+        FileRange podRange = FileRange.forPod(
+                layout.dataStart(), layout.dataEnd(), podIndex, totalPods);
+        log.info("Pod {}/{} — range=[{}, {}) isLast={}",
+                podIndex, totalPods, podRange.startByte(), podRange.endByte(), podRange.isLast());
+
+        return new StepBuilder("managerStep", jobRepository)
+                .partitioner("workerStep", new PodByteRangePartitioner(podRange))
+                .partitionHandler(handler)
+                .build();
     }
 
-    // ── Worker step (runs inside each thread) ──────────────────────────────────
+    // ── Worker step ───────────────────────────────────────────────────────────
 
     @Bean
-    public Step workerStep() {
+    public Step workerStep(ByteRangeFlatFileItemReader stepScopedReader) {
         return new StepBuilder("workerStep", jobRepository)
-                .<DimensionRecord, DimensionRecord>chunk(props.getBatch().getChunkSize(), transactionManager)
-                // Reader is created per-partition via the factory method below
-                .reader(workerStepReader(new ExecutionContext()))  // placeholder; real reader built in factory
+                .<DimensionRecord, DimensionRecord>chunk(props.batch().chunkSize(), transactionManager)
+                .reader(stepScopedReader)
                 .processor(processor)
                 .writer(writer)
-                // Retry transient DB errors up to 3 times
                 .faultTolerant()
                     .retryLimit(3)
-                    .retry(org.springframework.dao.TransientDataAccessException.class)
-                // Skip unrecoverable parse errors without failing the step
-                    .skipLimit(10_000)
+                    .retry(TransientDataAccessException.class)
+                    .skipLimit(props.batch().skipLimit())
                     .skip(Exception.class)
-                    .noSkip(org.springframework.dao.DataIntegrityViolationException.class)
+                    .noSkip(DataIntegrityViolationException.class)
                 .build();
     }
 
-    /**
-     * Factory method called by Spring Batch for each partition's step execution.
-     * The {@link ExecutionContext} carries {@code startByte}, {@code endByte},
-     * and {@code isLast} populated by {@link PodByteRangePartitioner}.
-     */
-    public ByteRangeFlatFileItemReader workerStepReader(ExecutionContext ctx) {
-        long startByte = ctx.containsKey("startByte") ? ctx.getLong("startByte") : 0L;
-        long endByte = ctx.containsKey("endByte") ? ctx.getLong("endByte") : Long.MAX_VALUE;
-        boolean isLast = !ctx.containsKey("isLast") || Boolean.parseBoolean(ctx.getString("isLast"));
-
-        FileRange subRange = new FileRange(startByte, endByte, isLast);
-        AppProperties.Columns cols = props.getColumns();
-
-        return new ByteRangeFlatFileItemReader(
-                Path.of(props.getFile().getPath()),
-                subRange,
-                cols.getCsiIdIndex(),
-                cols.getPersonIdIndex(),
-                cols.getCountryCodeIndex(),
-                cols.getEconomicCodeIndex());
-    }
-
-    // ── Step-scoped reader bean wired via StepExecutionContext ─────────────────
-
-    /**
-     * This bean is step-scoped so Spring Batch creates a fresh instance per partition,
-     * injecting the correct {@code stepExecutionContext} values.
-     */
     @Bean
-    @org.springframework.batch.core.configuration.annotation.StepScope
+    @StepScope
     public ByteRangeFlatFileItemReader stepScopedReader(
-            @Value("#{stepExecutionContext['startByte'] ?: 0L}") long startByte,
-            @Value("#{stepExecutionContext['endByte'] ?: 9223372036854775807L}") long endByte,
-            @Value("#{stepExecutionContext['isLast'] ?: 'true'}") String isLast) {
+            FileLayout layout,
+            Instant loadedAt,
+            @Value("#{stepExecutionContext['startByte']}") long startByte,
+            @Value("#{stepExecutionContext['endByte']}") long endByte,
+            @Value("#{stepExecutionContext['isLast']}") String isLast) {
 
-        FileRange subRange = new FileRange(startByte, endByte, Boolean.parseBoolean(isLast));
-        AppProperties.Columns cols = props.getColumns();
-
+        FileRange range = new FileRange(startByte, endByte, Boolean.parseBoolean(isLast));
         return new ByteRangeFlatFileItemReader(
-                Path.of(props.getFile().getPath()),
-                subRange,
-                cols.getCsiIdIndex(),
-                cols.getPersonIdIndex(),
-                cols.getCountryCodeIndex(),
-                cols.getEconomicCodeIndex());
+                Path.of(props.file().path()),
+                range,
+                layout.dataStart(),
+                layout.columnIndex(),
+                loadedAt);
     }
 
     // ── Thread pool ───────────────────────────────────────────────────────────
 
     @Bean
     public TaskExecutor batchTaskExecutor() {
+        int threads = props.batch().threadPoolSize();
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(props.getBatch().getThreadPoolSize());
-        executor.setMaxPoolSize(props.getBatch().getThreadPoolSize());
-        executor.setQueueCapacity(props.getBatch().getThreadPoolSize() * 2);
+        executor.setCorePoolSize(threads);
+        executor.setMaxPoolSize(threads);
+        executor.setQueueCapacity(threads * 2);
         executor.setThreadNamePrefix("batch-worker-");
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(600);
         executor.initialize();
         return executor;
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static long resolveFileSize(Path path) {
-        try {
-            return Files.size(path);
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot read file size for: " + path, e);
-        }
     }
 }

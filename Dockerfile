@@ -1,28 +1,24 @@
 # ─── Build stage ──────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17-jdk-alpine AS builder
+FROM eclipse-temurin:25-jdk AS builder
 WORKDIR /workspace
 
 COPY pom.xml .
 COPY src ./src
 
-# Download dependencies first (cached layer if pom.xml unchanged)
-RUN apk add --no-cache maven && \
-    mvn dependency:go-offline -q
-
-# Build the fat JAR, skip tests (tests run in CI pipeline separately)
-RUN mvn package -DskipTests -q
+# Install Maven, pre-fetch deps for layer caching, then build the fat JAR
+RUN apt-get update && apt-get install -y --no-install-recommends maven && \
+    rm -rf /var/lib/apt/lists/* && \
+    mvn -q dependency:go-offline && \
+    mvn -q package -DskipTests
 
 # ─── Runtime stage ─────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:25-jre
 WORKDIR /app
 
-# Create non-root user for security
-RUN addgroup -S batchgroup && adduser -S batchuser -G batchgroup
+RUN groupadd -r batchgroup && useradd -r -g batchgroup batchuser
 
-# Copy the fat JAR
 COPY --from=builder /workspace/target/batch-upload-*.jar app.jar
 
-# The shared NFS/PVC will be mounted here by Kubernetes
 RUN mkdir -p /data && chown batchuser:batchgroup /data
 
 USER batchuser
